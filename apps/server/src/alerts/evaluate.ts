@@ -2,29 +2,31 @@
  * Pure alert logic: turn a measurement into a sample, and a sample + the
  * alert's current state into a decision. No I/O, fully unit tested.
  */
-import type { AlertCondition, AlertKind, AlertMeasurementState } from "@bullpane/shared";
+import type { AlertCondition, AlertKind, AlertMeasurementState, AlertUnit } from "@bullpane/shared";
 
 /**
  * What the engine could observe for one queue.
  *
  * `waiting_above` is a GAUGE: the backlog right now, read from the state counts.
- * The error kinds are RATES: `failed`/`completed` are DELTAS over the alert's
- * window, produced by diffing BullMQ's cumulative metrics counters between two
- * ticks (see metricsWindow.ts). `null` there means the delta could not be
- * computed — no metrics on the queue, or not enough history yet — and `state`
- * says which. Never pass 0 for "unknown": 0 failures looks perfectly healthy.
+ * The error kinds are RATES: `failed`/`completed` are what finished inside the
+ * alert's window, read from BullMQ's per-minute metrics lists (see
+ * lua/windowMetrics.lua). `null` there means the queue collects no metrics and
+ * `state` says so. Never pass 0 for "unknown": 0 failures looks perfectly healthy.
+ * `duration_above` carries the percentile of the completed jobs sampled in the
+ * window, or null when none were.
  */
 export type Measurement =
   | { kind: "waiting_above"; waiting: number }
   | { kind: "failed_above"; failed: number | null; state: AlertMeasurementState }
-  | { kind: "failed_rate_above"; failed: number | null; completed: number | null; state: AlertMeasurementState };
+  | { kind: "failed_rate_above"; failed: number | null; completed: number | null; state: AlertMeasurementState }
+  | { kind: "duration_above"; sampled: number; durationMs: number | null };
 
 export interface Sample {
   /** null = not enough data to judge (e.g. below minSample); leaves state untouched */
   breached: boolean | null;
   value: number | null;
   threshold: number | null;
-  unit: "jobs" | "%" | null;
+  unit: AlertUnit | null;
   /**
    * Why a null `breached` is null. "ok" with a null breached means the data was
    * there but too thin to judge (below minSample). The UI shows this instead of
@@ -80,6 +82,15 @@ export function measure(condition: AlertCondition, m: Measurement): Sample {
       const rate = Math.round((failed / total) * 10000) / 100;
       return { breached: rate > condition.percent, value: rate, threshold: condition.percent, unit: "%", state: "ok" };
     }
+    case "duration_above": {
+      const { sampled, durationMs } = m as Extract<Measurement, { kind: "duration_above" }>;
+      // Too few completed jobs in the window to call a percentile anything.
+      if (durationMs === null || sampled < condition.minSample) {
+        return { breached: null, value: null, threshold: condition.seconds, unit: "s", state: "ok" };
+      }
+      const seconds = Math.round(durationMs) / 1000;
+      return { breached: seconds > condition.seconds, value: seconds, threshold: condition.seconds, unit: "s", state: "ok" };
+    }
   }
 }
 
@@ -114,7 +125,9 @@ export function evaluateAlert(alert: AlertStateInput, sample: Pick<Sample, "brea
 
 export function formatValue(sample: Pick<Sample, "value" | "unit">): string {
   if (sample.value === null) return "n/a";
-  return sample.unit === "%" ? `${sample.value}%` : String(sample.value);
+  if (sample.unit === "%") return `${sample.value}%`;
+  if (sample.unit === "s") return `${sample.value}s`;
+  return String(sample.value);
 }
 
 export function describeCondition(condition: AlertCondition): string {
@@ -128,6 +141,8 @@ export function describeCondition(condition: AlertCondition): string {
       return `more than ${condition.threshold} failed jobs in ${condition.windowMinutes} min`;
     case "failed_rate_above":
       return `failure rate above ${condition.percent}% over ${condition.windowMinutes} min (min sample ${condition.minSample})`;
+    case "duration_above":
+      return `p${condition.percentile} processing time above ${condition.seconds}s over ${condition.windowMinutes} min (min sample ${condition.minSample})`;
   }
 }
 
@@ -138,20 +153,21 @@ export function formatMessage(input: {
   /** the queue being reported (worst queue for folder alerts) */
   queueName: string | null;
   connectionName: string | null;
-  /** set for folder-scoped alerts */
-  folderName?: string | null;
+  /** what a wide alert covers: `folder "Payments"`, `connection "Prod"`, `every queue`; null for a queue alert */
+  scopeLabel?: string | null;
   sample: Sample;
 }): string {
   const queue = input.queueName ? `queue "${input.queueName}"` : "queue";
   const on = input.connectionName ? ` on ${input.connectionName}` : "";
-  const folder = input.folderName ? ` (folder "${input.folderName}")` : "";
-  const scope = `${queue}${on}${folder}`;
+  const wide = input.scopeLabel ? ` (${input.scopeLabel})` : "";
+  const scope = `${queue}${on}${wide}`;
   if (input.status === "test") {
-    const target = input.folderName ? `folder "${input.folderName}"` : scope;
+    const target = input.scopeLabel ?? scope;
     return `Test notification for ${target}: ${describeCondition(input.condition)}.`;
   }
   const value = formatValue(input.sample);
-  const threshold = input.sample.threshold === null ? "" : ` (threshold ${input.sample.threshold}${input.sample.unit === "%" ? "%" : ""})`;
+  const unit = input.sample.unit === "%" ? "%" : input.sample.unit === "s" ? "s" : "";
+  const threshold = input.sample.threshold === null ? "" : ` (threshold ${input.sample.threshold}${unit})`;
   return input.status === "fired"
     ? `${scope}: ${describeCondition(input.condition)} — current ${value}${threshold}.`
     : `${scope}: back below threshold — current ${value}${threshold}.`;

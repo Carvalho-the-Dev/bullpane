@@ -121,6 +121,48 @@ export interface WindowCounts {
  * `null` means the hash does not exist: this queue collects no metrics, and
  * therefore its failure rate cannot be measured honestly at all.
  */
+/** What one queue needs measured this tick. Windows are in minutes. */
+export interface WindowMetricsRequest {
+  queue: string;
+  rateWindows: number[];
+  durationWindows: number[];
+}
+
+export interface WindowRate {
+  windowMinutes: number;
+  completed: number;
+  failed: number;
+  /**
+   * Minutes of the window BullMQ's metrics actually cover. Lower than
+   * `windowMinutes` when the queue started collecting recently or
+   * `maxDataPoints` is shorter than the window: the counts are then a floor.
+   */
+  coveredMinutes: number;
+}
+
+export interface WindowDuration {
+  windowMinutes: number;
+  /** completed jobs read (newest first, capped by the caller) */
+  sampled: number;
+  /** null when nothing was sampled */
+  p50Ms: number | null;
+  p95Ms: number | null;
+}
+
+/**
+ * Finished-job counts over trailing windows from BullMQ's per-minute metrics
+ * lists (exact to the minute, immune to removeOnComplete), plus a bounded
+ * processing-time sample from the completed zset. See lua/windowMetrics.lua.
+ */
+export interface WindowMetrics {
+  /** false when the Worker was created without `metrics`: rates cannot be measured */
+  hasMetrics: boolean;
+  rates: WindowRate[];
+  durations: WindowDuration[];
+  /** unix ms of the read */
+  collectedAt: number;
+}
+
 export interface MetricsCounters {
   completed: number | null;
   failed: number | null;
@@ -202,6 +244,12 @@ export interface Inspector {
    * two reads is what error alerts measure.
    */
   getMetricsCounters(queueName: string): Promise<MetricsCounters>;
+  /**
+   * Windowed rates + durations for many queues of this connection: one EVALSHA
+   * per queue, all in ONE pipeline (parallel single calls on a cluster). A
+   * queue whose script errored is left out of the result.
+   */
+  getWindowMetrics(requests: WindowMetricsRequest[], opts?: { durationSample?: number; now?: number }): Promise<Record<string, WindowMetrics>>;
   getJobs(
     queueName: string,
     state: JobState,

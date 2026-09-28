@@ -995,6 +995,81 @@ describe("getMetricsCounters (source of the error alerts)", () => {
   });
 });
 
+describe("getWindowMetrics (Needs attention + error alerts)", () => {
+  // A fixed clock on a minute boundary + 30 s, so "which minute" is unambiguous.
+  const NOW = Math.floor(Date.now() / 60_000) * 60_000 + 30_000;
+  const MIN = 60_000;
+
+  /** Writes the metrics layout exactly as BullMQ's collectMetrics.lua leaves it. */
+  async function writeMetrics(queue: string, side: "completed" | "failed", m: { count: number; prevTS: number; prevCount: number; points: number[] }) {
+    await raw.hset(`bull:${queue}:metrics:${side}`, { count: m.count, prevTS: m.prevTS, prevCount: m.prevCount });
+    // points[0] is the newest minute (m0 - 1); LPUSH reverses, so push oldest first
+    if (m.points.length > 0) await raw.lpush(`bull:${queue}:metrics:${side}:data`, ...[...m.points].reverse());
+  }
+
+  it("sums the pending minute plus the list, per window, and reports coverage", async () => {
+    const NAME = "wm-hand";
+    // 10 finished in the current minute (not flushed yet); minutes before: 5, 7, 0, 20
+    await writeMetrics(NAME, "completed", { count: 110, prevTS: NOW, prevCount: 100, points: [5, 7, 0, 20] });
+    await writeMetrics(NAME, "failed", { count: 4, prevTS: NOW - 2 * MIN, prevCount: 3, points: [2] });
+    const out = await inspector.getWindowMetrics([{ queue: NAME, rateWindows: [1, 2, 3, 5, 10], durationWindows: [] }], { now: NOW });
+    const w = out[NAME]!;
+    expect(w.hasMetrics).toBe(true);
+    expect(w.rates.map((r) => r.completed)).toEqual([10, 15, 22, 42, 42]);
+    // failed: 1 pending in minute now-2, 2 in minute now-3
+    expect(w.rates.map((r) => r.failed)).toEqual([0, 0, 1, 3, 3]);
+    // coverage is the weaker side: failed knows minutes now-2..now (3) + 1 point = 4
+    expect(w.rates[4]!.coveredMinutes).toBe(4);
+    expect(w.rates[3]!.coveredMinutes).toBe(4);
+    expect(w.rates[0]!.coveredMinutes).toBe(1);
+  });
+
+  it("an idle queue reads zero inside the window, not the stale head of the list", async () => {
+    const NAME = "wm-idle";
+    // last flush 10 minutes ago; those 50 + 50 jobs are OUTSIDE a 5-minute window
+    await writeMetrics(NAME, "completed", { count: 200, prevTS: NOW - 10 * MIN, prevCount: 150, points: [50, 1, 1, 1] });
+    const out = await inspector.getWindowMetrics([{ queue: NAME, rateWindows: [5, 15], durationWindows: [] }], { now: NOW });
+    expect(out[NAME]!.rates[0]).toMatchObject({ completed: 0, failed: 0, coveredMinutes: 5 });
+    // 15 minutes reaches minute now-10 (50 pending) and the 4 minutes before it
+    expect(out[NAME]!.rates[1]).toMatchObject({ completed: 103, coveredMinutes: 15 });
+  });
+
+  it("says hasMetrics=false when the Worker collects no metrics", async () => {
+    const out = await inspector.getWindowMetrics([{ queue: "wm-never", rateWindows: [5], durationWindows: [5] }]);
+    expect(out["wm-never"]).toMatchObject({ hasMetrics: false, rates: [{ completed: 0, failed: 0 }], durations: [{ sampled: 0, p50Ms: null }] });
+  });
+
+  it("is right with a real Worker and aggressive removeOnComplete, where ZCOUNT would lie", async () => {
+    const NAME = "wm-real";
+    const queue = q(NAME);
+    const w = new Worker(
+      NAME,
+      async (job: Job) => {
+        if (job.name === "bad") throw new Error("failed");
+        await new Promise((r) => setTimeout(r, 20));
+        return 1;
+      },
+      { connection, metrics: { maxDataPoints: 100 }, concurrency: 5 },
+    );
+    workers.push(w);
+    for (let i = 0; i < 40; i++) await queue.add("ok", { i }, { removeOnComplete: { count: 5 }, attempts: 1 });
+    for (let i = 0; i < 4; i++) await queue.add("bad", { i }, { attempts: 1 });
+    await waitFor(async () => {
+      const c = await queue.getJobCounts("completed", "failed");
+      return c.completed === 5 && c.failed === 4;
+    }, 30_000);
+    await w.close();
+
+    const out = await inspector.getWindowMetrics([{ queue: NAME, rateWindows: [5], durationWindows: [5] }]);
+    const m = out[NAME]!;
+    expect(m.rates[0]).toMatchObject({ completed: 40, failed: 4 });
+    // durations come from what retention left: the 5 newest completed jobs
+    expect(m.durations[0]!.sampled).toBe(5);
+    expect(m.durations[0]!.p50Ms).toBeGreaterThanOrEqual(15);
+    expect(m.durations[0]!.p95Ms).toBeGreaterThanOrEqual(m.durations[0]!.p50Ms!);
+  });
+});
+
 describe("job schedulers (repeatable jobs)", () => {
   /**
    * Schedulers do not appear in any of the 8 states: bullmq keeps them in the

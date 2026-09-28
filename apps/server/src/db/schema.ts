@@ -140,7 +140,8 @@ export const alerts = mysqlTable(
     id: id(),
     name: varchar("name", { length: 120 }).notNull(),
     enabled: boolean("enabled").notNull().default(true),
-    scopeType: mysqlEnum("scope_type", ["queue", "folder"]).notNull().default("queue"),
+    /** see migrations/0008_alert_wide_scopes.sql */
+    scopeType: mysqlEnum("scope_type", ["queue", "folder", "connection", "global"]).notNull().default("queue"),
     connectionId: varchar("connection_id", { length: 36 }),
     queueName: varchar("queue_name", { length: 255 }),
     folderId: varchar("folder_id", { length: 36 }),

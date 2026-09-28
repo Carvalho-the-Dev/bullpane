@@ -15,6 +15,10 @@ export type {
   PingResult,
   QueueStats,
   WindowCounts,
+  WindowDuration,
+  WindowMetrics,
+  WindowMetricsRequest,
+  WindowRate,
 } from "./types.js";
 
 export { RedisInspector } from "./inspector.js";

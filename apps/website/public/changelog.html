@@ -3,7 +3,31 @@
 <h1>Changelog</h1>
 <p class="updated">Last updated 13 September 2026</p>
 
-<p class="lead-sm">Every version of Bullpane and what it changed for you. Docker images are published per version: <code>ghcr.io/madmorett/bullpane:0.2.0</code>, <code>:0.2</code>, <code>:latest</code>.</p>
+<p class="lead-sm">Every version of Bullpane and what it changed for you. Docker images are published per version: <code>ghcr.io/madmorett/bullpane:0.3.0</code>, <code>:0.3</code>, <code>:latest</code>.</p>
+
+<article class="release">
+  <div class="release-head">
+    <h2 id="v0-3-0">0.3.0</h2>
+    <span class="release-date">27 September 2026</span>
+  </div>
+  <p class="release-note">Needs attention becomes your alert rules. Open the dashboard and the top of the Overview shows every queue breaking a rule, with the value, the window and the threshold.</p>
+  <h3>Added</h3>
+  <ul>
+    <li><strong>Needs attention driven by alert rules (Pro).</strong> Cards read <code>26% failed &middot; 15m &gt; 10%</code>, <code>p95 4.2s &middot; 15m &gt; 2s</code> or <code>674 waiting &gt; 200</code>. A rule without channels is dashboard only; add Slack or a webhook to be notified as well.</li>
+    <li><strong>Rules on every queue or a whole connection</strong>, besides one queue and a folder. The most specific rule wins per condition kind, so &ldquo;5% everywhere, 30% for the importer&rdquo; is two rules. Hidden queues are skipped.</li>
+    <li><strong>Processing time rule:</strong> p50 or p95 of the jobs completed in the window.</li>
+    <li>A starting dashboard-only rule on new installs (failure rate above 10% over 15 minutes), and a count of queues that cannot be measured because their Workers keep no BullMQ metrics.</li>
+  </ul>
+  <h3>Changed</h3>
+  <ul>
+    <li>Failure rules read BullMQ&rsquo;s per-minute metrics directly: exact to the minute from the first evaluation, so a restart no longer leaves rules &ldquo;warming up&rdquo; for a whole window, and <code>removeOnComplete</code> never skews them.</li>
+    <li>When a queue rule and a folder rule of the same kind cover a queue, only the queue rule judges it now.</li>
+  </ul>
+  <h3>Known limits</h3>
+  <ul>
+    <li>Only jobs finished by Workers created with <code>metrics: { maxDataPoints }</code> are counted; a queue shared by a deployment without it is undercounted. A job that fails an attempt and succeeds on retry counts as completed. Processing time needs completed jobs to remain in Redis.</li>
+  </ul>
+</article>
 
 <article class="release">
   <div class="release-head">

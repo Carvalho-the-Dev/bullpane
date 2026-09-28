@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_ATTENTION_THRESHOLDS, type AttentionThresholds } from "@bullpane/shared";
+import { DEFAULT_ATTENTION_THRESHOLDS, type AttentionFinding, type AttentionThresholds } from "@bullpane/shared";
 import { attentionReasons, splitByAttention } from "../queueAttention";
 import type { QueueEntry } from "../groupQueues";
 
@@ -102,5 +102,63 @@ describe("splitByAttention", () => {
     const { attention, rest } = splitByAttention([entry({ name: "ok", active: 1, ratesCompleted: 3 })], th(10, 0));
     expect(attention).toHaveLength(0);
     expect(rest.map((r) => r.queue.name)).toEqual(["ok"]);
+  });
+});
+
+describe("splitByAttention — Pro, driven by rule findings", () => {
+  const finding = (queueName: string, over: Partial<AttentionFinding> = {}): AttentionFinding => ({
+    alertId: `r-${queueName}`,
+    alertName: "rule",
+    kind: "failed_rate_above",
+    scopeType: "global",
+    connectionId: "c1",
+    queueName,
+    value: 20,
+    threshold: 5,
+    unit: "%",
+    windowMinutes: 15,
+    notifies: false,
+    ...over,
+  });
+
+  it("flags queues with findings and drops the rate/depth heuristics", () => {
+    // `failing` (rates) and `failed` (pile) would flag this in free; in Pro only a rule can.
+    const noisy = entry({ name: "noisy", failed: 500, ratesFailed: 3, active: 1, ratesCompleted: 100 });
+    const broken = entry({ name: "broken", active: 1, ratesCompleted: 10 });
+    const { attention, rest } = splitByAttention([noisy, broken], OFF, 8, [finding("broken")]);
+    expect(attention.map((a) => a.entry.queue.name)).toEqual(["broken"]);
+    expect(attention[0]!.findings).toHaveLength(1);
+    expect(rest.map((r) => r.queue.name)).toEqual(["noisy"]);
+  });
+
+  it("keeps paused and no-worker backlog as built-in checks", () => {
+    const paused = entry({ name: "paused", paused: true });
+    const stuck = entry({ name: "stuck", waiting: 3 });
+    const { attention } = splitByAttention([paused, stuck], OFF, 8, []);
+    expect(attention.map((a) => [a.entry.queue.name, a.reasons])).toEqual([
+      ["paused", ["paused"]],
+      ["stuck", ["backlog"]],
+    ]);
+  });
+
+  it("ranks a failure finding above a paused queue, and the worse breach first", () => {
+    const paused = entry({ name: "paused", paused: true });
+    const a = entry({ name: "a", active: 1, ratesCompleted: 5 });
+    const b = entry({ name: "b", active: 1, ratesCompleted: 5 });
+    const { attention } = splitByAttention([paused, a, b], OFF, 8, [finding("a", { value: 6 }), finding("b", { value: 60 })]);
+    expect(attention.map((x) => x.entry.queue.name)).toEqual(["b", "a", "paused"]);
+  });
+
+  it("ranks every rule finding, even a slow queue, above a paused one", () => {
+    const paused = entry({ name: "paused", paused: true, waiting: 0 });
+    const slowQ = entry({ name: "slow", active: 1, ratesCompleted: 5 });
+    const { attention } = splitByAttention([paused, slowQ], OFF, 8, [finding("slow", { kind: "duration_above", unit: "s", value: 1.2, threshold: 1 })]);
+    expect(attention.map((x) => x.entry.queue.name)).toEqual(["slow", "paused"]);
+  });
+
+  it("matches findings by connection too", () => {
+    const q = entry({ name: "shared", active: 1, ratesCompleted: 5 });
+    const { attention } = splitByAttention([q], OFF, 8, [finding("shared", { connectionId: "other" })]);
+    expect(attention).toHaveLength(0);
   });
 });

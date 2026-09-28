@@ -119,6 +119,21 @@ A folder alert evaluates every queue in the folder and fires when any breaches (
 reported in the event and the notification). `AlertEvent.connectionId` is nullable.
 The Queue page offers "Create alert" which opens the alert dialog pre-scoped to that queue.
 
+### Alert rules and Needs attention (0.3)
+
+`scope` also accepts `{ type: "connection", connectionId }` (every discovered queue on
+that connection, hidden ones excluded) and `{ type: "global" }` (every queue on every
+connection). For one queue and one condition kind only the most specific rule applies
+(queue > folder > connection > global). `channels` may be empty: a dashboard-only rule.
+
+New condition: `{ kind: "duration_above", seconds, percentile: 50 | 95, windowMinutes,
+minSample }` — processing time (`finishedOn - processedOn`) of up to the 100 newest jobs
+completed in the window.
+
+| Method | Path | Min role | Notes |
+|---|---|---|---|
+| GET | /attention | viewer | Pro (`alerts`). `AttentionSnapshot`: `{ evaluatedAt, rules, findings: AttentionFinding[], unmeasured }`. One finding per (rule, queue) breaking it, with `value`, `threshold`, `unit` (`jobs` / `%` / `s`), `windowMinutes` and `notifies`. Served from the engine's memory, never reads Redis. |
+
 ### Hidden queues
 
 A queue the team stopped using still shows up in the sidebar, the cards, the table

@@ -15,6 +15,7 @@ export const KIND_LABEL: Record<AlertKind, string> = {
   waiting_above: "Waiting jobs above threshold (incl. prioritized, excl. paused)",
   failed_above: "Failures above threshold in a window (needs worker metrics)",
   failed_rate_above: "Failure rate above percent (needs worker metrics)",
+  duration_above: "Processing time above (p50 / p95 of completed jobs)",
 };
 
 interface ChannelDraft {
@@ -35,6 +36,8 @@ interface Draft {
   windowMinutes: string;
   percent: string;
   minSample: string;
+  seconds: string;
+  percentile: "50" | "95";
   cooldownMinutes: string;
   channels: ChannelDraft[];
 }
@@ -44,7 +47,7 @@ function emptyDraft(connectionId: string, scope?: AlertScope): Draft {
     name: "",
     enabled: true,
     scopeType: scope?.type ?? "queue",
-    connectionId: scope?.type === "queue" ? scope.connectionId : connectionId,
+    connectionId: scope?.type === "queue" || scope?.type === "connection" ? scope.connectionId : connectionId,
     queueName: scope?.type === "queue" ? scope.queueName : "",
     folderId: scope?.type === "folder" ? scope.folderId : "",
     kind: "failed_above",
@@ -52,8 +55,11 @@ function emptyDraft(connectionId: string, scope?: AlertScope): Draft {
     windowMinutes: "5",
     percent: "5",
     minSample: "20",
+    seconds: "30",
+    percentile: "95",
     cooldownMinutes: "30",
-    channels: [{ type: "slack", url: "", headersText: "" }],
+    // Dashboard only until a channel is added: a rule is useful in Needs attention on its own.
+    channels: [],
   };
 }
 
@@ -63,7 +69,7 @@ function fromAlert(a: Alert): Draft {
     name: a.name,
     enabled: a.enabled,
     scopeType: a.scope.type,
-    connectionId: a.scope.type === "queue" ? a.scope.connectionId : "",
+    connectionId: a.scope.type === "queue" || a.scope.type === "connection" ? a.scope.connectionId : "",
     queueName: a.scope.type === "queue" ? a.scope.queueName : "",
     folderId: a.scope.type === "folder" ? a.scope.folderId : "",
     kind: c.kind,
@@ -71,6 +77,8 @@ function fromAlert(a: Alert): Draft {
     windowMinutes: "windowMinutes" in c ? String(c.windowMinutes) : "5",
     percent: "percent" in c ? String(c.percent) : "5",
     minSample: "minSample" in c ? String(c.minSample) : "20",
+    seconds: c.kind === "duration_above" ? String(c.seconds) : "30",
+    percentile: c.kind === "duration_above" ? (String(c.percentile) as "50" | "95") : "95",
     cooldownMinutes: String(a.cooldownMinutes),
     channels: a.channels.map((ch) =>
       ch.type === "slack"
@@ -108,11 +116,27 @@ function toInput(d: Draft): CreateAlertInput {
     case "failed_above":
       condition = { kind: "failed_above", threshold: num(d.threshold), windowMinutes: num(d.windowMinutes) };
       break;
+    case "duration_above":
+      condition = {
+        kind: "duration_above",
+        seconds: num(d.seconds),
+        percentile: d.percentile === "50" ? 50 : 95,
+        windowMinutes: num(d.windowMinutes),
+        minSample: num(d.minSample),
+      };
+      break;
     default:
       condition = { kind: "failed_rate_above", percent: num(d.percent), windowMinutes: num(d.windowMinutes), minSample: num(d.minSample) };
       break;
   }
-  const scope: AlertScope = d.scopeType === "folder" ? { type: "folder", folderId: d.folderId } : { type: "queue", connectionId: d.connectionId, queueName: d.queueName };
+  const scope: AlertScope =
+    d.scopeType === "folder"
+      ? { type: "folder", folderId: d.folderId }
+      : d.scopeType === "global"
+        ? { type: "global" }
+        : d.scopeType === "connection"
+          ? { type: "connection", connectionId: d.connectionId }
+          : { type: "queue", connectionId: d.connectionId, queueName: d.queueName };
   const channels: AlertChannel[] = d.channels.map((c) => (c.type === "slack" ? { type: "slack", webhookUrl: c.url.trim() } : { type: "webhook", url: c.url.trim(), headers: parseHeaders(c.headersText) }));
   return {
     name: d.name.trim(),
@@ -186,15 +210,15 @@ export function AlertDialog({
       open={open}
       onClose={onClose}
       size="lg"
-      title={alert ? `Edit alert` : "New alert"}
-      description="Evaluated on the server against live counts. Notifications go to every channel, then wait for the cooldown."
+      title={alert ? `Edit rule` : "New rule"}
+      description="Evaluated on the server every few seconds. Every queue that breaks it shows up in Needs attention; add channels to be notified too."
       footer={
         <>
           <Button variant="ghost" size="sm" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="primary" size="sm" onClick={submit} loading={busy}>
-            {alert ? "Save changes" : "Create alert"}
+            {alert ? "Save changes" : "Create rule"}
           </Button>
         </>
       }
@@ -214,12 +238,26 @@ export function AlertDialog({
             value={draft.scopeType}
             onChange={(e) => set("scopeType", e.target.value as AlertScope["type"])}
             options={[
-              { value: "queue", label: "One queue" },
+              { value: "global", label: "Every queue" },
+              { value: "connection", label: "Every queue on a connection" },
               { value: "folder", label: "Every queue in a folder" },
+              { value: "queue", label: "One queue" },
             ]}
-            hint={draft.scopeType === "folder" ? "Fires when any queue in the folder breaches; reports the worst one." : undefined}
           />
-          {draft.scopeType === "queue" ? (
+          {draft.scopeType === "global" ? (
+            <p className="self-end pb-2 text-xs text-fg-muted sm:col-span-2">
+              Every discovered queue on every connection, except hidden ones.
+            </p>
+          ) : draft.scopeType === "connection" ? (
+            <Select
+              label="Connection"
+              value={draft.connectionId}
+              onChange={(e) => set("connectionId", e.target.value)}
+              error={errors.connectionId}
+              wrapperClassName="sm:col-span-2"
+              options={(connections.data ?? []).map((c) => ({ value: c.id, label: c.name }))}
+            />
+          ) : draft.scopeType === "queue" ? (
             <>
               <Select
                 label="Connection"
@@ -246,6 +284,11 @@ export function AlertDialog({
               options={[{ value: "", label: folders.isLoading ? "Loading…" : folders.data?.length ? "Pick a folder" : "No folders yet", disabled: true }, ...(folders.data ?? []).map((f) => ({ value: f.id, label: f.parentId ? `${folders.data?.find((p) => p.id === f.parentId)?.name ?? "?"} / ${f.name}` : f.name }))]}
             />
           )}
+          <p className="text-[11px] text-fg-subtle sm:col-span-3">
+            {draft.scopeType === "queue"
+              ? "A rule on one queue replaces wider rules of the same kind for that queue."
+              : "Wide rules flag each queue that breaks them and notify once, naming the worst. The most specific rule of each kind wins: a queue or folder rule overrides this one for its queues."}
+          </p>
         </fieldset>
 
         <fieldset className="grid gap-3 rounded-md border border-border p-3">
@@ -256,34 +299,73 @@ export function AlertDialog({
               <Input label={draft.kind === "waiting_above" ? "Waiting jobs above" : "Failures above"} type="number" min={1} value={draft.threshold} onChange={(e) => set("threshold", e.target.value)} error={errors.threshold} />
             )}
             {draft.kind === "failed_rate_above" && <Input label="Failure rate above (%)" type="number" min={0.1} max={100} step={0.1} value={draft.percent} onChange={(e) => set("percent", e.target.value)} error={errors.percent} />}
-            {(draft.kind === "failed_above" || draft.kind === "failed_rate_above") && (
+            {draft.kind === "duration_above" && (
+              <>
+                <Input label="Slower than (seconds)" type="number" min={0.001} step={0.1} value={draft.seconds} onChange={(e) => set("seconds", e.target.value)} error={errors.seconds} />
+                <Select
+                  label="Percentile"
+                  value={draft.percentile}
+                  onChange={(e) => set("percentile", e.target.value as "50" | "95")}
+                  options={[
+                    { value: "95", label: "p95 (the slow tail)" },
+                    { value: "50", label: "p50 (the typical job)" },
+                  ]}
+                />
+              </>
+            )}
+            {draft.kind !== "waiting_above" && (
               <Input label="Window (minutes)" type="number" min={1} max={1440} value={draft.windowMinutes} onChange={(e) => set("windowMinutes", e.target.value)} error={errors.windowMinutes} />
             )}
-            {draft.kind === "failed_rate_above" && (
-              <Input label="Min sample (finished jobs)" type="number" min={1} value={draft.minSample} onChange={(e) => set("minSample", e.target.value)} error={errors.minSample} hint="Ignore windows with fewer finished jobs." />
+            {(draft.kind === "failed_rate_above" || draft.kind === "duration_above") && (
+              <Input
+                label={draft.kind === "duration_above" ? "Min sample (completed jobs)" : "Min sample (finished jobs)"}
+                type="number"
+                min={1}
+                max={draft.kind === "duration_above" ? 100 : undefined}
+                value={draft.minSample}
+                onChange={(e) => set("minSample", e.target.value)}
+                error={errors.minSample}
+                hint="Ignore windows with fewer jobs."
+              />
             )}
           </div>
+          {draft.kind === "duration_above" && (
+            <p className="text-xs text-fg-muted">
+              Time from a job starting its final attempt to completing, over the newest 100 completed jobs in the window. BullMQ
+              metrics count jobs but do not time them, so this reads completed jobs still in Redis: with{" "}
+              <code className="font-mono">removeOnComplete: true</code> there is nothing to read and the rule never fires;{" "}
+              <code className="font-mono">{"{ count: N }"}</code> keeps exactly the recent jobs it needs.
+            </p>
+          )}
           {isErrorAlertKind(draft.kind) && (
             <>
               <p className="text-xs text-fg-muted">
-                Measured by diffing BullMQ's own metrics counters between evaluations, so the number is right even when{" "}
-                <code className="font-mono">removeOnComplete</code> prunes the queue. After a server restart the alert reports
-                "warming up" until it has {draft.windowMinutes || "N"} minute(s) of history.
+                Measured from BullMQ's own per-minute metrics, so the number is right even when{" "}
+                <code className="font-mono">removeOnComplete</code> prunes the queue, and exact from the first evaluation —
+                a restart does not reset the window.
               </p>
               {draft.scopeType === "queue"
                 ? draft.connectionId && draft.queueName && <QueueMetricsWarning connectionId={draft.connectionId} queueName={draft.queueName} />
-                : draft.folderId && <FolderMetricsWarning folder={folders.data?.find((f) => f.id === draft.folderId)} />}
+                : draft.scopeType === "folder"
+                  ? draft.folderId && <FolderMetricsWarning folder={folders.data?.find((f) => f.id === draft.folderId)} />
+                  : null}
             </>
           )}
         </fieldset>
 
         <fieldset className="space-y-3 rounded-md border border-border p-3">
-          <legend className="px-1 text-[11px] font-semibold tracking-wider text-fg-subtle uppercase">Channels</legend>
+          <legend className="px-1 text-[11px] font-semibold tracking-wider text-fg-subtle uppercase">Notify</legend>
+          {draft.channels.length === 0 && (
+            <p className="text-xs text-fg-muted">
+              Dashboard only: breaking queues show up in <span className="text-fg">Needs attention</span> and the rule keeps its
+              fired/resolved history, but nobody is notified. Add a channel to be told.
+            </p>
+          )}
           {draft.channels.map((c, i) => (
             <div key={i} className="grid gap-2 rounded-md bg-surface-2/50 p-2 sm:grid-cols-[130px_1fr_auto]">
               <Select aria-label="Channel type" value={c.type} onChange={(e) => setChannel(i, { type: e.target.value as ChannelDraft["type"] })} options={[{ value: "slack", label: "Slack webhook" }, { value: "webhook", label: "Webhook (POST)" }]} />
               <Input aria-label="URL" mono placeholder={c.type === "slack" ? "https://hooks.slack.com/services/…" : "https://example.com/hooks/bullmq"} value={c.url} onChange={(e) => setChannel(i, { url: e.target.value })} />
-              <Button size="icon" variant="ghost" aria-label="Remove channel" className="hover:text-danger" disabled={draft.channels.length === 1} onClick={() => setDraft((d) => ({ ...d, channels: d.channels.filter((_, j) => j !== i) }))}>
+              <Button size="icon" variant="ghost" aria-label="Remove channel" className="hover:text-danger" onClick={() => setDraft((d) => ({ ...d, channels: d.channels.filter((_, j) => j !== i) }))}>
                 <Trash2 />
               </Button>
               {c.type === "webhook" && (
@@ -301,7 +383,7 @@ export function AlertDialog({
           </Button>
         </fieldset>
 
-        <Input label="Cooldown (minutes)" type="number" min={1} max={1440} value={draft.cooldownMinutes} onChange={(e) => set("cooldownMinutes", e.target.value)} error={errors.cooldownMinutes} hint="Minimum time between notifications while the alert keeps firing." wrapperClassName="max-w-xs" />
+        {draft.channels.length > 0 && <Input label="Cooldown (minutes)" type="number" min={1} max={1440} value={draft.cooldownMinutes} onChange={(e) => set("cooldownMinutes", e.target.value)} error={errors.cooldownMinutes} hint="Minimum time between notifications while the rule keeps firing." wrapperClassName="max-w-xs" />}
       </div>
     </Dialog>
   );

@@ -156,3 +156,25 @@ describe("formatMessage", () => {
     expect(resolved).toMatch(/back below threshold/);
   });
 });
+
+describe("duration_above", () => {
+  const condition = { kind: "duration_above", seconds: 2, percentile: 95, windowMinutes: 15, minSample: 5 } as const;
+
+  it("compares the percentile in seconds, strictly above", () => {
+    expect(measure(condition, { kind: "duration_above", sampled: 20, durationMs: 2_500 })).toMatchObject({ breached: true, value: 2.5, threshold: 2, unit: "s" });
+    expect(measure(condition, { kind: "duration_above", sampled: 20, durationMs: 2_000 }).breached).toBe(false);
+  });
+
+  it("refuses to judge below minSample or with nothing sampled", () => {
+    expect(measure(condition, { kind: "duration_above", sampled: 4, durationMs: 60_000 }).breached).toBeNull();
+    expect(measure(condition, { kind: "duration_above", sampled: 0, durationMs: null }).breached).toBeNull();
+  });
+
+  it("formats seconds in the notification and names the wide scope", () => {
+    const sample = { breached: true, value: 4.2, threshold: 2, unit: "s", state: "ok" } as const;
+    const msg = formatMessage({ kind: "duration_above", condition, status: "fired", queueName: "media", connectionName: "Prod", scopeLabel: "every queue", sample });
+    expect(msg).toContain("p95 processing time above 2s over 15 min");
+    expect(msg).toContain("current 4.2s (threshold 2s)");
+    expect(msg).toContain('queue "media" on Prod (every queue)');
+  });
+});

@@ -32,6 +32,8 @@ export const SCRIPTS = {
   getSchedulers: { numberOfKeys: 1, readOnly: true },
   /** meta, limiter, groups, groups:limit, groups:max, groups:paused, groups:active:count, groups:metas, metrics:completed */
   queueSetup: { numberOfKeys: 9, readOnly: true },
+  /** metrics:completed, metrics:failed, their :data lists, completed zset */
+  windowMetrics: { numberOfKeys: 5, readOnly: true },
 } as const;
 
 export type ScriptName = keyof typeof SCRIPTS;

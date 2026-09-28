@@ -1,36 +1,57 @@
 /**
- * Alert evaluation loop. Runs every BULLPANE_ALERTS_INTERVAL seconds while the
- * edition is pro (a license or DEMO_MODE). One ping and one getQueueStats per
- * connection per tick, shared by every alert on that connection.
+ * Alert evaluation loop, and the source of the Overview's "Needs attention" in
+ * Pro. Runs every BULLPANE_ALERTS_INTERVAL seconds while the edition has
+ * alerts (a license or DEMO_MODE).
  *
- * HOW ERROR ALERTS MEASURE (the whole point of this file)
+ * ONE RULE SYSTEM, TWO OUTPUTS. An alert is a rule: a scope (queue, folder,
+ * connection or every queue), a condition and zero or more channels. Every
+ * tick measures each rule on each queue it covers; the queues that breach are
+ * the Needs attention findings (`attention()`), and the rule as a whole fires
+ * and notifies when any of them breaches. A rule with no channels is
+ * "dashboard only": it flags and records events, it notifies nobody.
  *
- * `failed_above` and `failed_rate_above` are measured ONLY from BullMQ's own
- * cumulative metrics counters, sampled each tick and diffed against the oldest
- * sample still inside the alert's window (see metricsWindow.ts). ZCOUNT over the
- * completed/failed zsets — what this used to do — counts only jobs that are
- * still in Redis, so any queue using `removeOnComplete` reports a wildly
- * inflated failure rate (measured: 4.8% real read as 23.1%). There is
- * deliberately NO fallback: a queue whose Worker does not collect metrics gets
- * NO error alert, and one informative event says so. An absent alert is a known
- * gap; a lying alert destroys trust in every other alert.
+ * MOST SPECIFIC WINS. For one queue and one condition kind, only the rules at
+ * the most specific scope level apply (queue > folder > connection > global).
+ * "Failure rate > 5% everywhere, > 30% for the importer" is two rules, and the
+ * importer is judged by the second one only.
  *
- * `waiting_above` is a gauge, not a rate, so it still comes straight from the
- * state counts.
+ * HOW ERROR RULES MEASURE. From BullMQ's per-minute metrics lists, read in one
+ * Lua call per queue (lua/windowMetrics.lua), never from the completed/failed
+ * sorted sets: those only hold what retention kept, so a queue with
+ * `removeOnComplete` reads as failing (4.8% real read as 23.1%). There is no
+ * fallback: a queue whose Worker keeps no metrics gets no error finding, and
+ * the rule says so. Because the lists are per minute and written by BullMQ,
+ * the window is exact from the first tick — a restart does not blind the
+ * dashboard for `windowMinutes`.
+ *
+ * `waiting_above` is a gauge from the state counts. `duration_above` samples the
+ * newest completed jobs in the window (bounded), because BullMQ metrics hold
+ * counts, not durations.
+ *
+ * COST PER TICK. Per connection: one discovery + one pipelined stats call
+ * (shared, only when a rule needs counts or a wide scope) and one pipelined
+ * windowMetrics call covering every queue any rule measures. Never per rule.
  */
-import type { Alert, AlertCondition, AlertMeasurement, FolderQueueRef } from "@bullpane/shared";
-import { isErrorAlertKind } from "@bullpane/shared";
-import type { Inspector, MetricsCounters, QueueStats } from "@bullpane/redis-inspector";
+import type {
+  Alert,
+  AlertCondition,
+  AlertMeasurement,
+  AlertScope,
+  AttentionFinding,
+  AttentionSnapshot,
+  AttentionUnmeasured,
+  FolderQueueRef,
+} from "@bullpane/shared";
+import { ALERT_SCOPE_SPECIFICITY, DURATION_SAMPLE_MAX, isErrorAlertKind } from "@bullpane/shared";
+import type { Inspector, QueueStats, WindowMetrics } from "@bullpane/redis-inspector";
 import type { Config } from "../config";
 import type { AlertRow, ConnectionRow } from "../db/schema";
 import type { AlertsService } from "../services/alerts";
 import type { ConnectionsService } from "../services/connections";
 import type { EditionService } from "../services/edition";
 import type { FoldersService } from "../services/folders";
-import { mapWithConcurrency } from "../services/flows";
 import { alertLink, deliverToAll, type DeliveryResult, type FetchLike } from "./deliver";
 import { describeCondition, evaluateAlert, formatMessage, measure, type Measurement, type Sample } from "./evaluate";
-import { CounterHistoryStore } from "./metricsWindow";
 import { scopeOf, toAlertDto } from "../services/alerts";
 
 export interface EngineLogger {
@@ -40,48 +61,65 @@ export interface EngineLogger {
   debug(obj: object, msg: string): void;
 }
 
-interface TickCache {
-  connections: Map<string, Promise<ConnectionRow | null>>;
-  stats: Map<string, Promise<{ names: string[]; stats: Record<string, QueueStats> }>>;
-  singleStats: Map<string, Promise<QueueStats | undefined>>;
-  /** cumulative metrics counters, one read per (connection, queue) per tick */
-  counters: Map<string, Promise<MetricsCounters>>;
-}
-
-/** One queue an alert watches. */
+/** One queue a rule watches. */
 export type Target = FolderQueueRef;
 
-interface Measured {
-  sample: Sample;
-  /** the queue the reported value belongs to (worst queue for folder alerts); null when inconclusive */
-  target: Target | null;
-  /** what the evaluation could actually see, surfaced on the Alert DTO and events */
-  measurement: AlertMeasurement;
+interface Discovered {
+  names: string[];
+  stats: Record<string, QueueStats>;
+}
+
+interface TickCache {
+  connections: Map<string, Promise<ConnectionRow | null>>;
+  allConnections: Promise<ConnectionRow[]> | null;
+  discovered: Map<string, Promise<Discovered>>;
+  singleStats: Map<string, Promise<QueueStats | undefined>>;
+  hidden: Map<string, Promise<Set<string>>>;
+  /** windowMetrics per connection, filled once per tick before rules are judged */
+  windows: Map<string, Record<string, WindowMetrics> | null>;
 }
 
 interface ResolvedScope {
   targets: Target[];
+  /** `folder "Payments"`, `connection "Prod"`, `every queue`; null for a queue rule */
+  label: string | null;
   folderName: string | null;
 }
 
+interface Measured {
+  sample: Sample;
+  /** the queue the reported value belongs to (worst queue); null when inconclusive */
+  target: Target | null;
+  measurement: AlertMeasurement;
+}
+
+/** A per-queue sample, plus whether Redis could be read at all. */
+interface TargetSample {
+  target: Target;
+  sample: Sample;
+  /** the connection or script errored: unknown, and not a reason to resolve */
+  unreachable: boolean;
+  noMetrics: boolean;
+  coveredMs: number | null;
+}
+
 const EVENT_RETENTION_DAYS = 30;
+/** How many unmeasurable queues a notice names before "and N more". */
+const NOTICE_MAX_NAMES = 10;
 
 export class AlertsEngine {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  /** a change arrived while a tick was running: run again right after */
+  private rerun = false;
   private ticks = 0;
-  /**
-   * Counter history per (alert, connection, queue). In memory on purpose: it is
-   * a sliding window of a few hundred integers, worthless after a restart, and
-   * not worth a MySQL write every 15 s. A restart therefore means
-   * "accumulating history" (warming_up), never "zero failures".
-   */
-  private readonly history = new CounterHistoryStore();
-  /** last measurement state per alert, so the DTO can show it and the UI stop lying */
+  /** last measurement state per rule, so the DTO can show it and the UI stop lying */
   private readonly lastMeasurement = new Map<string, AlertMeasurement>();
+  /** Needs attention, as of the last completed tick */
+  private snapshot: AttentionSnapshot = { evaluatedAt: null, rules: 0, findings: [], unmeasured: [] };
   /**
-   * When we last told the owner that an alert cannot measure, per alert. Rate
-   * limited to the alert's own cooldown so the events table does not get one
+   * When we last told the owner that a rule cannot measure, per rule. Rate
+   * limited to the rule's own cooldown so the events table does not get one
    * row every 15 s forever.
    */
   private readonly noticedAt = new Map<string, number>();
@@ -113,7 +151,7 @@ export class AlertsEngine {
   }
 
   /**
-   * What the last tick could see for this alert, for GET /alerts. `undefined`
+   * What the last tick could see for this rule, for GET /alerts. `undefined`
    * before the first tick (or when alerts are locked), which the UI shows as
    * "not evaluated yet" rather than as a green "ok".
    */
@@ -121,11 +159,25 @@ export class AlertsEngine {
     return this.lastMeasurement.get(alertId);
   }
 
-  /** An alert was deleted or re-scoped: its history and notices are meaningless. */
+  /** Needs attention for GET /attention: in memory, no Redis read. */
+  attention(): AttentionSnapshot {
+    return this.snapshot;
+  }
+
+  /** A rule was deleted or re-scoped: what we remembered about it is meaningless. */
   forget(alertId: string): void {
     this.lastMeasurement.delete(alertId);
     this.noticedAt.delete(alertId);
-    this.history.dropAlert(alertId);
+    this.snapshot = { ...this.snapshot, findings: this.snapshot.findings.filter((f) => f.alertId !== alertId) };
+  }
+
+  /**
+   * Re-evaluate soon after a rule changed, so the Overview does not wait a
+   * whole interval to reflect it. Coalesced with a running tick.
+   */
+  refresh(): void {
+    if (this.running) this.rerun = true;
+    else void this.tick();
   }
 
   async tick(): Promise<void> {
@@ -135,16 +187,7 @@ export class AlertsEngine {
     const startedAt = Date.now();
     try {
       const rows = await this.deps.alerts.listRows({ enabledOnly: true });
-      if (rows.length > 0) {
-        const cache = newCache();
-        await Promise.all(
-          rows.map((row) =>
-            this.evaluateOne(row, cache, startedAt).catch((err: unknown) =>
-              this.deps.log.warn({ alertId: row.id, err: errorText(err) }, "alert evaluation failed"),
-            ),
-          ),
-        );
-      }
+      await this.evaluateAll(rows, startedAt);
       this.ticks += 1;
       if (this.ticks % 240 === 1) {
         await this.deps.alerts.pruneEvents(new Date(startedAt - EVENT_RETENTION_DAYS * 86_400_000));
@@ -154,11 +197,15 @@ export class AlertsEngine {
     } finally {
       this.running = false;
     }
+    if (this.rerun) {
+      this.rerun = false;
+      void this.tick();
+    }
   }
 
   /** POST /alerts/:id/test — synthetic event to every channel. */
   async sendTest(row: AlertRow): Promise<DeliveryResult[]> {
-    const scope = await this.resolveScope(row);
+    const scope = await this.resolveScope(row, newCache());
     const first = scope.targets[0] ?? null;
     const connection = first ? await this.deps.connections.getRow(first.connectionId).catch(() => null) : null;
     const alert = toAlertDto(row);
@@ -169,7 +216,7 @@ export class AlertsEngine {
       status: "test",
       queueName: first?.queueName ?? null,
       connectionName: connection?.name ?? null,
-      folderName: scope.folderName,
+      scopeLabel: scope.label,
       sample,
     });
     return deliverToAll(
@@ -189,34 +236,84 @@ export class AlertsEngine {
     );
   }
 
-  /** Queue alert → that queue. Folder alert → every queue in the folder (any connection). */
-  private async resolveScope(row: AlertRow): Promise<ResolvedScope> {
-    const scope = scopeOf(row);
-    if (scope.type === "queue") {
-      return { targets: [{ connectionId: scope.connectionId, queueName: scope.queueName }], folderName: null };
-    }
-    const folder = await this.deps.folders.get(scope.folderId);
-    return { targets: folder.queues, folderName: folder.name };
-  }
+  // -------------------------------------------------------------------------
+  // one tick
+  // -------------------------------------------------------------------------
 
-  private async evaluateOne(row: AlertRow, cache: TickCache, now: number): Promise<void> {
-    const scope = await this.resolveScope(row).catch(() => null);
-    if (!scope) {
-      this.deps.log.warn({ alertId: row.id }, "alert points to a missing folder");
+  private async evaluateAll(rows: AlertRow[], now: number): Promise<void> {
+    if (rows.length === 0) {
+      this.snapshot = { evaluatedAt: new Date(now).toISOString(), rules: 0, findings: [], unmeasured: [] };
       return;
     }
-    if (scope.targets.length === 0) return; // empty folder: nothing to watch
+    const cache = newCache();
 
-    const measured = await this.measure(row, scope.targets, cache);
-    if (!measured) return; // Redis unreachable: keep state, try next tick
+    // 1. Who does each rule cover?
+    const scopes = await Promise.all(
+      rows.map((row) =>
+        this.resolveScope(row, cache).catch((err: unknown) => {
+          this.deps.log.warn({ alertId: row.id, err: errorText(err) }, "alert scope could not be resolved");
+          return null;
+        }),
+      ),
+    );
 
+    // 2. Most specific wins, per (condition kind, queue).
+    const effective = applyOverrides(rows, scopes);
+
+    // 3. One windowMetrics pipeline per connection, for everything any rule measures.
+    await this.loadWindows(rows, effective, cache, now);
+
+    // 4. Judge every rule on its queues.
+    const findings: AttentionFinding[] = [];
+    const unmeasured = new Map<string, AttentionUnmeasured>();
+    await Promise.all(
+      rows.map(async (row, i) => {
+        const scope = scopes[i];
+        const targets = effective[i] ?? [];
+        if (!scope) return;
+        try {
+          const perTarget = await this.measureTargets(row, targets, cache);
+          for (const t of perTarget) {
+            if (t.sample.breached === true && t.sample.value !== null && t.sample.threshold !== null) {
+              findings.push(toFinding(row, t));
+            }
+            if (t.noMetrics) {
+              const key = `${t.target.connectionId}\u0000${t.target.queueName}`;
+              unmeasured.set(key, { connectionId: t.target.connectionId, queueName: t.target.queueName, reason: "no_metrics" });
+            }
+          }
+          await this.decide(row, scope, targets, perTarget, cache, now);
+        } catch (err) {
+          this.deps.log.warn({ alertId: row.id, err: errorText(err) }, "alert evaluation failed");
+        }
+      }),
+    );
+
+    this.snapshot = {
+      evaluatedAt: new Date(now).toISOString(),
+      rules: rows.length,
+      findings,
+      unmeasured: [...unmeasured.values()],
+    };
+  }
+
+  /** Rule-level state machine + notifications, from the per-queue samples. */
+  private async decide(row: AlertRow, scope: ResolvedScope, targets: Target[], perTarget: TargetSample[], cache: TickCache, now: number): Promise<void> {
+    if (targets.length === 0) {
+      // Empty folder, or every queue is overridden by a more specific rule.
+      this.lastMeasurement.set(row.id, { source: isErrorAlertKind(row.condition.kind) ? "metrics" : "counts", state: "ok", windowCoveredMs: null });
+      if (row.firing) await this.transition(row, scope, "resolve", { sample: emptySample(row.condition), target: null }, cache, now);
+      return;
+    }
+    // Redis unreachable for every queue: keep state, try next tick.
+    if (perTarget.every((t) => t.unreachable)) return;
+
+    const measured = summariseTargets(row.condition, perTarget);
     this.lastMeasurement.set(row.id, measured.measurement);
 
-    // An alert that cannot measure is worse than no alert only if it is silent.
-    // Tell the owner once (per cooldown), then stay quiet.
     if (measured.measurement.state === "no_metrics") {
       await this.noticeNoMetrics(row, scope, measured.measurement, cache, now);
-      return; // never fire, never resolve: we know nothing about this queue
+      return; // never fire, never resolve: we know nothing about these queues
     }
 
     const decision = evaluateAlert(
@@ -225,8 +322,19 @@ export class AlertsEngine {
       now,
     );
     if (decision.action === "none") return;
+    await this.transition(row, scope, decision.action, measured, cache, now, decision);
+  }
 
-    const status = decision.action === "resolve" ? "resolved" : "fired";
+  private async transition(
+    row: AlertRow,
+    scope: ResolvedScope,
+    action: "fire" | "renotify" | "resolve",
+    measured: Pick<Measured, "sample" | "target">,
+    cache: TickCache,
+    now: number,
+    decision?: { firing: boolean; lastFiredAt: number | null },
+  ): Promise<void> {
+    const status = action === "resolve" ? "resolved" : "fired";
     const target = measured.target ?? scope.targets[0] ?? null;
     const connection = target ? await this.connection(target.connectionId, cache) : null;
     const queueName = target?.queueName ?? null;
@@ -237,14 +345,13 @@ export class AlertsEngine {
       status,
       queueName,
       connectionName: connection?.name ?? null,
-      folderName: scope.folderName,
+      scopeLabel: scope.label,
       sample: measured.sample,
     });
 
-    await this.deps.alerts.setState(row.id, {
-      firing: decision.firing,
-      lastFiredAt: decision.lastFiredAt === null ? null : new Date(decision.lastFiredAt),
-    });
+    const firing = decision?.firing ?? false;
+    const lastFiredAt = decision ? decision.lastFiredAt : row.lastFiredAt ? row.lastFiredAt.getTime() : null;
+    await this.deps.alerts.setState(row.id, { firing, lastFiredAt: lastFiredAt === null ? null : new Date(lastFiredAt) });
     await this.deps.alerts.recordEvent({
       alertId: row.id,
       alertName: row.name,
@@ -255,7 +362,10 @@ export class AlertsEngine {
       message,
       value: measured.sample.value,
     });
-    this.deps.log.info({ alertId: row.id, action: decision.action, value: measured.sample.value }, message);
+    this.deps.log.info({ alertId: row.id, action, value: measured.sample.value, at: now }, message);
+
+    // Dashboard-only rule: the event above is the whole outcome.
+    if (row.channels.length === 0) return;
 
     const alert: Alert = toAlertDto(row);
     const results = await deliverToAll(
@@ -289,6 +399,63 @@ export class AlertsEngine {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // scope resolution
+  // -------------------------------------------------------------------------
+
+  /**
+   * Queue → that queue. Folder → its queues (any connection, hidden ones
+   * included: the admin put them there by name). Connection / global → every
+   * discovered queue, minus hidden ones, which the admin said to stop seeing.
+   */
+  private async resolveScope(row: AlertRow, cache: TickCache): Promise<ResolvedScope> {
+    const scope: AlertScope = scopeOf(row);
+    switch (scope.type) {
+      case "queue":
+        return { targets: [{ connectionId: scope.connectionId, queueName: scope.queueName }], label: null, folderName: null };
+      case "folder": {
+        const folder = await this.deps.folders.get(scope.folderId);
+        return { targets: folder.queues, label: `folder "${folder.name}"`, folderName: folder.name };
+      }
+      case "connection": {
+        const connection = await this.connection(scope.connectionId, cache);
+        if (!connection) throw new Error("connection not found");
+        return { targets: await this.visibleQueues(connection, cache), label: `connection "${connection.name}"`, folderName: null };
+      }
+      case "global": {
+        const all = await this.allConnections(cache);
+        const lists = await Promise.all(all.map((c) => this.visibleQueues(c, cache).catch(() => [] as Target[])));
+        return { targets: lists.flat(), label: "every queue", folderName: null };
+      }
+    }
+  }
+
+  private async visibleQueues(connection: ConnectionRow, cache: TickCache): Promise<Target[]> {
+    const inspector = this.deps.connections.inspectorFor(connection);
+    const [{ names }, hidden] = await Promise.all([this.discover(inspector, cache), this.hidden(connection.id, cache)]);
+    return names.filter((n) => !hidden.has(n)).map((queueName) => ({ connectionId: connection.id, queueName }));
+  }
+
+  private allConnections(cache: TickCache): Promise<ConnectionRow[]> {
+    if (!cache.allConnections) {
+      cache.allConnections = this.deps.connections.listRows();
+      // Seed the per-id cache so later lookups do not hit MySQL again.
+      void cache.allConnections.then((rows) => {
+        for (const r of rows) if (!cache.connections.has(r.id)) cache.connections.set(r.id, Promise.resolve(r));
+      });
+    }
+    return cache.allConnections;
+  }
+
+  private hidden(connectionId: string, cache: TickCache): Promise<Set<string>> {
+    let p = cache.hidden.get(connectionId);
+    if (!p) {
+      p = this.deps.connections.hiddenQueueNames(connectionId).catch(() => new Set<string>());
+      cache.hidden.set(connectionId, p);
+    }
+    return p;
+  }
+
   private connection(id: string, cache: TickCache): Promise<ConnectionRow | null> {
     let p = cache.connections.get(id);
     if (!p) {
@@ -299,21 +466,21 @@ export class AlertsEngine {
   }
 
   /** One discovery + one pipelined stats call per connection per tick. */
-  private allStats(inspector: Inspector, cache: TickCache): Promise<{ names: string[]; stats: Record<string, QueueStats> }> {
-    let p = cache.stats.get(inspector.config.id);
+  private discover(inspector: Inspector, cache: TickCache): Promise<Discovered> {
+    let p = cache.discovered.get(inspector.config.id);
     if (!p) {
       p = (async () => {
         const names = await inspector.discoverQueues();
         const stats = names.length ? await inspector.getQueueStats(names) : {};
         return { names, stats };
       })();
-      cache.stats.set(inspector.config.id, p);
+      cache.discovered.set(inspector.config.id, p);
     }
     return p;
   }
 
   private async queueStats(inspector: Inspector, queue: string, cache: TickCache): Promise<QueueStats | undefined> {
-    const all = await this.allStats(inspector, cache);
+    const all = await this.discover(inspector, cache);
     if (all.stats[queue]) return all.stats[queue];
     // Not discovered (filtered out or brand new): one direct call, still shared per tick.
     const key = `${inspector.config.id}:${queue}`;
@@ -325,31 +492,115 @@ export class AlertsEngine {
     return p;
   }
 
-  /** One HGET pair per (connection, queue) per tick, shared by every alert on it. */
-  private metricsCounters(inspector: Inspector, queue: string, cache: TickCache): Promise<MetricsCounters> {
-    const key = `${inspector.config.id}:${queue}`;
-    let p = cache.counters.get(key);
-    if (!p) {
-      p = inspector.getMetricsCounters(queue);
-      cache.counters.set(key, p);
-    }
-    return p;
+  // -------------------------------------------------------------------------
+  // measurement
+  // -------------------------------------------------------------------------
+
+  /**
+   * Collect every (queue, window) any rule needs and read them in ONE
+   * pipelined call per connection. A connection that errors is recorded as
+   * null so its rules keep their state instead of resolving.
+   */
+  private async loadWindows(rows: AlertRow[], effective: Target[][], cache: TickCache, _now: number): Promise<void> {
+    const wanted = new Map<string, Map<string, { rate: Set<number>; duration: Set<number> }>>();
+    rows.forEach((row, i) => {
+      const c = row.condition;
+      if (c.kind === "waiting_above") return;
+      for (const t of effective[i] ?? []) {
+        let perConn = wanted.get(t.connectionId);
+        if (!perConn) wanted.set(t.connectionId, (perConn = new Map()));
+        let req = perConn.get(t.queueName);
+        if (!req) perConn.set(t.queueName, (req = { rate: new Set(), duration: new Set() }));
+        if (c.kind === "duration_above") req.duration.add(c.windowMinutes);
+        else req.rate.add(c.windowMinutes);
+      }
+    });
+
+    await Promise.all(
+      [...wanted].map(async ([connectionId, queues]) => {
+        const connection = await this.connection(connectionId, cache);
+        if (!connection) {
+          cache.windows.set(connectionId, null);
+          return;
+        }
+        try {
+          const inspector = this.deps.connections.inspectorFor(connection);
+          const requests = [...queues].map(([queue, r]) => ({ queue, rateWindows: [...r.rate], durationWindows: [...r.duration] }));
+          cache.windows.set(connectionId, await inspector.getWindowMetrics(requests, { durationSample: DURATION_SAMPLE_MAX }));
+        } catch (err) {
+          this.deps.log.warn({ connectionId, err: errorText(err) }, "could not read window metrics (redis error); keeping alert state");
+          cache.windows.set(connectionId, null);
+        }
+      }),
+    );
+  }
+
+  private async measureTargets(row: AlertRow, targets: Target[], cache: TickCache): Promise<TargetSample[]> {
+    const condition = row.condition;
+    return Promise.all(
+      targets.map(async (target): Promise<TargetSample> => {
+        const unknown = (unreachable: boolean): TargetSample => ({
+          target,
+          sample: emptySample(condition, "warming_up"),
+          unreachable,
+          noMetrics: false,
+          coveredMs: null,
+        });
+
+        if (condition.kind === "waiting_above") {
+          const connection = await this.connection(target.connectionId, cache);
+          if (!connection) return unknown(true);
+          try {
+            const s = await this.queueStats(this.deps.connections.inspectorFor(connection), target.queueName, cache);
+            /**
+             * Backlog = `wait` + `prioritized`. `paused` is deliberately EXCLUDED:
+             * pausing a queue for maintenance moves every waiting job into
+             * `paused`, and flagging that as a backlog punishes the correct move.
+             */
+            const waiting = s ? s.counts.waiting + s.counts.prioritized : 0;
+            return { target, sample: measure(condition, { kind: "waiting_above", waiting }), unreachable: false, noMetrics: false, coveredMs: null };
+          } catch {
+            return unknown(true);
+          }
+        }
+
+        const windows = cache.windows.get(target.connectionId);
+        if (windows === null || windows === undefined) return unknown(true);
+        const wm = windows[target.queueName];
+        if (!wm) return unknown(true); // script error for this queue
+
+        if (condition.kind === "duration_above") {
+          const d = wm.durations.find((x) => x.windowMinutes === condition.windowMinutes);
+          const durationMs = d ? (condition.percentile === 50 ? d.p50Ms : d.p95Ms) : null;
+          const m: Measurement = { kind: "duration_above", sampled: d?.sampled ?? 0, durationMs };
+          return { target, sample: measure(condition, m), unreachable: false, noMetrics: false, coveredMs: null };
+        }
+
+        if (!wm.hasMetrics) {
+          const m: Measurement =
+            condition.kind === "failed_above"
+              ? { kind: "failed_above", failed: null, state: "no_metrics" }
+              : { kind: "failed_rate_above", failed: null, completed: null, state: "no_metrics" };
+          return { target, sample: measure(condition, m), unreachable: false, noMetrics: true, coveredMs: null };
+        }
+        const r = wm.rates.find((x) => x.windowMinutes === condition.windowMinutes);
+        if (!r) return unknown(false);
+        const m: Measurement =
+          condition.kind === "failed_above"
+            ? { kind: "failed_above", failed: r.failed, state: "ok" }
+            : { kind: "failed_rate_above", failed: r.failed, completed: r.completed, state: "ok" };
+        return { target, sample: measure(condition, m), unreachable: false, noMetrics: false, coveredMs: r.coveredMinutes * 60_000 };
+      }),
+    );
   }
 
   /**
-   * Record ONE informative event saying the alert is inert because the queue
-   * collects no metrics, and how to fix it. Re-armed after the alert's own
-   * cooldown so a permanently misconfigured queue produces a reminder now and
-   * then instead of 5.760 rows a day. No notification is delivered: this is a
-   * configuration problem for whoever reads the dashboard, not an incident.
+   * Record ONE informative event saying the rule is inert because its queues
+   * collect no metrics, and how to fix it. Re-armed after the rule's own
+   * cooldown. No notification is delivered: this is a configuration problem
+   * for whoever reads the dashboard, not an incident.
    */
-  private async noticeNoMetrics(
-    row: AlertRow,
-    scope: ResolvedScope,
-    measurement: AlertMeasurement,
-    cache: TickCache,
-    now: number,
-  ): Promise<void> {
+  private async noticeNoMetrics(row: AlertRow, scope: ResolvedScope, measurement: AlertMeasurement, cache: TickCache, now: number): Promise<void> {
     const last = this.noticedAt.get(row.id);
     const cooldownMs = row.cooldownMinutes * 60_000;
     if (last !== undefined && now - last < cooldownMs) return;
@@ -358,124 +609,88 @@ export class AlertsEngine {
     const target = scope.targets[0] ?? null;
     const connection = target ? await this.connection(target.connectionId, cache) : null;
     const named = measurement.queuesWithoutMetrics ?? [];
+    const listed = named.slice(0, NOTICE_MAX_NAMES).join(", ") + (named.length > NOTICE_MAX_NAMES ? ` and ${named.length - NOTICE_MAX_NAMES} more` : "");
     const which =
-      scope.folderName !== null
-        ? `folder "${scope.folderName}" — ${named.length > 0 ? `no metrics on: ${named.join(", ")}` : "no queue collects metrics"}`
+      scope.label !== null
+        ? `${scope.label} — ${named.length > 0 ? `no metrics on: ${listed}` : "no queue collects metrics"}`
         : `queue "${target?.queueName ?? "?"}"`;
     const message =
       `Cannot measure ${describeCondition(row.condition)} on ${which}: BullMQ keeps no metrics counters for it, ` +
       `so failure counts would have to come from the completed/failed sorted sets — which lie whenever removeOnComplete prunes them. ` +
-      `This alert is inert until metrics are on. Fix: new Worker(name, fn, { metrics: { maxDataPoints: MetricsTime.ONE_WEEK } }).`;
+      `This rule is inert until metrics are on. Fix: new Worker(name, fn, { metrics: { maxDataPoints: MetricsTime.ONE_WEEK } }).`;
 
     await this.deps.alerts.recordEvent({
       alertId: row.id,
       alertName: row.name,
       connectionId: target?.connectionId ?? null,
-      queueName: scope.folderName !== null ? null : target?.queueName ?? null,
+      queueName: scope.label !== null ? null : target?.queueName ?? null,
       kind: row.condition.kind,
       status: "no_metrics",
       message,
       value: null,
     });
-    this.deps.log.warn(
-      { alertId: row.id, connectionName: connection?.name ?? null, queues: named },
-      "alert cannot measure: queue collects no BullMQ metrics",
-    );
+    this.deps.log.warn({ alertId: row.id, connectionName: connection?.name ?? null, queues: named.length }, "alert cannot measure: queue collects no BullMQ metrics");
   }
+}
 
-  /**
-   * Measure every target queue (grouped by connection so each connection gets ONE
-   * discovery + ONE stats pipeline per tick) and report the worst one.
-   *
-   * `waiting_above` reads the state counts (a gauge). The error kinds read
-   * BullMQ's cumulative metrics counters and diff them against this alert's own
-   * history for that queue, so the number reported is the delta over
-   * `windowMinutes` and nothing else.
-   */
-  private async measure(row: AlertRow, targets: Target[], cache: TickCache): Promise<Measured | null> {
-    const condition = row.condition;
-    const windowMs = "windowMinutes" in condition ? condition.windowMinutes * 60_000 : 0;
-    const noMetrics: string[] = [];
-    let coveredMs: number | null = null;
-    try {
-      const measurements = await mapWithConcurrency(targets, 5, async (target): Promise<Measurement | null> => {
-        const connection = await this.connection(target.connectionId, cache);
-        if (!connection) return null;
-        const inspector = this.deps.connections.inspectorFor(connection);
-        const queue = target.queueName;
-        switch (condition.kind) {
-          case "waiting_above": {
-            const s = await this.queueStats(inspector, queue, cache);
-            const counts = s?.counts;
-            /**
-             * Backlog = `wait` + `prioritized`.
-             *
-             * `prioritized` stays in: those jobs are queued work waiting for a
-             * worker, exactly like `wait`. `paused` is deliberately EXCLUDED:
-             * when an operator pauses a queue every waiting job moves into the
-             * `paused` list, so including it meant pausing a queue for
-             * maintenance instantly fired a "backlog!" alert — punishing the
-             * correct operational move. A paused queue's real problem is that it
-             * is paused, which the dashboard already shows.
-             */
-            const waiting = counts ? counts.waiting + counts.prioritized : 0;
-            return { kind: "waiting_above", waiting };
-          }
-          case "failed_above":
-          case "failed_rate_above": {
-            const counters = await this.metricsCounters(inspector, queue, cache);
-            // History is per (alert, connection, queue): two alerts with
-            // different windows on the same queue must not share a buffer.
-            const delta = this.history.push(
-              CounterHistoryStore.key(row.id, target.connectionId, queue),
-              { t: counters.collectedAt, completed: counters.completed, failed: counters.failed },
-              windowMs,
-            );
-            if (delta.state === "no_metrics") noMetrics.push(queue);
-            if (delta.windowCoveredMs !== null) {
-              coveredMs = coveredMs === null ? delta.windowCoveredMs : Math.max(coveredMs, delta.windowCoveredMs);
-            }
-            return condition.kind === "failed_above"
-              ? { kind: "failed_above", failed: delta.failed, state: delta.state }
-              : { kind: "failed_rate_above", failed: delta.failed, completed: delta.completed, state: delta.state };
-          }
-        }
-      });
-      const samples = measurements.map(
-        (m): Sample =>
-          m
-            ? measure(condition, m)
-            : // connection row vanished mid-tick: unknown, not healthy
-              { breached: null, value: null, threshold: thresholdOf(condition), unit: null, state: "warming_up" },
-      );
-      const worst = pickWorst(condition, targets, samples);
-      return { ...worst, measurement: summarise(condition, samples, noMetrics, coveredMs) };
-    } catch (err) {
-      this.deps.log.warn({ alertId: row.id, err: errorText(err) }, "could not measure alert (redis error); keeping state");
-      return null;
+// ---------------------------------------------------------------------------
+// pure helpers (exported for tests)
+// ---------------------------------------------------------------------------
+
+/**
+ * Most specific wins: for each (condition kind, connection, queue), keep only
+ * the targets of the rules at the highest specificity covering it. Rules at
+ * the same level all keep the queue.
+ */
+export function applyOverrides(rows: Pick<AlertRow, "condition" | "scopeType">[], scopes: Array<{ targets: Target[] } | null>): Target[][] {
+  const key = (kind: string, t: Target) => `${kind}\u0000${t.connectionId}\u0000${t.queueName}`;
+  const best = new Map<string, number>();
+  rows.forEach((row, i) => {
+    const level = ALERT_SCOPE_SPECIFICITY[row.scopeType];
+    for (const t of scopes[i]?.targets ?? []) {
+      const k = key(row.condition.kind, t);
+      if ((best.get(k) ?? -1) < level) best.set(k, level);
     }
-  }
+  });
+  return rows.map((row, i) => {
+    const level = ALERT_SCOPE_SPECIFICITY[row.scopeType];
+    // A folder may list the same queue twice across nesting; judge it once.
+    const seen = new Set<string>();
+    return (scopes[i]?.targets ?? []).filter((t) => {
+      const k = key(row.condition.kind, t);
+      if (best.get(k) !== level || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  });
+}
+
+function summariseTargets(condition: AlertCondition, perTarget: TargetSample[]): Measured {
+  const reachable = perTarget.filter((t) => !t.unreachable);
+  const samples = reachable.map((t) => t.sample);
+  const noMetrics = reachable.filter((t) => t.noMetrics).map((t) => t.target.queueName);
+  const covered = reachable.reduce<number | null>((m, t) => (t.coveredMs === null ? m : m === null ? t.coveredMs : Math.max(m, t.coveredMs)), null);
+  const worst = pickWorst(
+    condition,
+    reachable.map((t) => t.target),
+    samples,
+  );
+  return { ...worst, measurement: summarise(condition, samples, noMetrics, covered) };
 }
 
 /**
  * Collapse the per-queue samples into one measurement for the DTO/UI.
  *
- * A folder alert can mix states: some queues measurable, some not. Precedence:
- * if ANY queue produced a usable reading the alert is `ok` (it can still fire on
- * that queue) but the unmeasurable queues are named so the UI can say "3 of 5
- * queues are not covered". Only when NOTHING is measurable does the alert go
- * `no_metrics` / `warming_up` and stop deciding altogether.
+ * A wide rule can mix states: some queues measurable, some not. If ANY queue
+ * produced a usable reading the rule is `ok` (it can still fire on that queue)
+ * but the unmeasurable queues are named. Only when NOTHING is measurable does
+ * the rule go `no_metrics` / `warming_up` and stop deciding altogether.
  */
-export function summarise(
-  condition: AlertCondition,
-  samples: Sample[],
-  queuesWithoutMetrics: string[],
-  windowCoveredMs: number | null,
-): AlertMeasurement {
+export function summarise(condition: AlertCondition, samples: Sample[], queuesWithoutMetrics: string[], windowCoveredMs: number | null): AlertMeasurement {
   const source: AlertMeasurement["source"] = isErrorAlertKind(condition.kind) ? "metrics" : "counts";
   const base: AlertMeasurement = { source, state: "ok", windowCoveredMs };
   if (queuesWithoutMetrics.length > 0) base.queuesWithoutMetrics = [...queuesWithoutMetrics];
-  if (samples.some((s) => s.state === "ok")) return base;
+  if (samples.length === 0 || samples.some((s) => s.state === "ok")) return base;
   // nothing measurable: no_metrics wins over warming_up, it is the actionable one
   base.state = samples.some((s) => s.state === "no_metrics") ? "no_metrics" : "warming_up";
   base.windowCoveredMs = null;
@@ -483,7 +698,7 @@ export function summarise(
 }
 
 /**
- * A folder alert fires when ANY of its queues breaches. Report the worst one:
+ * A wide rule fires when ANY of its queues breaches. Report the worst one:
  * a breached queue beats a healthy one, then the highest value wins.
  * If no queue has enough data the sample is inconclusive (breached null).
  */
@@ -510,7 +725,7 @@ export function pickWorst(condition: AlertCondition, targets: Target[], samples:
       : samples.some((x) => x.state === "warming_up")
         ? "warming_up"
         : "ok";
-    return { sample: { breached: null, value: null, threshold: thresholdOf(condition), unit: null, state }, target: null };
+    return { sample: { ...emptySample(condition), state }, target: null };
   }
   return best;
 }
@@ -522,11 +737,42 @@ export function thresholdOf(condition: AlertCondition): number | null {
       return condition.threshold;
     case "failed_rate_above":
       return condition.percent;
+    case "duration_above":
+      return condition.seconds;
   }
 }
 
+function emptySample(condition: AlertCondition, state: Sample["state"] = "ok"): Sample {
+  return { breached: null, value: null, threshold: thresholdOf(condition), unit: null, state };
+}
+
+function toFinding(row: AlertRow, t: TargetSample): AttentionFinding {
+  const c = row.condition;
+  return {
+    alertId: row.id,
+    alertName: row.name,
+    kind: c.kind,
+    scopeType: row.scopeType,
+    connectionId: t.target.connectionId,
+    queueName: t.target.queueName,
+    value: t.sample.value as number,
+    threshold: t.sample.threshold as number,
+    unit: t.sample.unit ?? "jobs",
+    windowMinutes: "windowMinutes" in c ? c.windowMinutes : null,
+    ...(c.kind === "duration_above" ? { percentile: c.percentile } : {}),
+    notifies: row.channels.length > 0,
+  };
+}
+
 function newCache(): TickCache {
-  return { connections: new Map(), stats: new Map(), singleStats: new Map(), counters: new Map() };
+  return {
+    connections: new Map(),
+    allConnections: null,
+    discovered: new Map(),
+    singleStats: new Map(),
+    hidden: new Map(),
+    windows: new Map(),
+  };
 }
 
 function errorText(err: unknown): string {

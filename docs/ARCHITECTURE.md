@@ -75,11 +75,23 @@ every waiting job into the `paused` list, and counting it made the correct opera
 move fire a backlog alert.
 
 `failed_above` and `failed_rate_above` are **rates**, and they come only from BullMQ's
-own cumulative metrics counters (`${prefix}:${queue}:metrics:completed|failed`, field
-`count`), read by `Inspector.getMetricsCounters` (two `HGET`s, one pipeline, one round
-trip, single-slot). The engine samples them each tick and diffs the newest sample
-against the oldest one still inside the alert's `windowMinutes`
-(`apps/server/src/alerts/metricsWindow.ts`).
+own metrics: the `${prefix}:${queue}:metrics:completed|failed` hashes (`count`,
+`prevTS`, `prevCount`) and their per-minute `:data` lists, read by
+`Inspector.getWindowMetrics` (`lua/windowMetrics.lua`, one EVALSHA per queue, every
+queue of a connection in one pipeline). BullMQ flushes `count - prevCount` into the
+list only when a job finishes in a later minute, so the script adds the unflushed
+minute to the list entries that fall inside the window and treats the minutes after
+`prevTS` as known zeros. The result is exact to the minute from the **first** read: no
+history is kept on our side, and a restart does not blind a rule for `windowMinutes`.
+`coveredMinutes` reports when the list is shorter than the window (metrics turned on
+recently, or `maxDataPoints` below the window); the counts are then a floor.
+
+`duration_above` is the one condition BullMQ metrics cannot answer (they count, they do
+not time). It reads the newest completed jobs inside the window — at most 100, one
+`HMGET processedOn finishedOn` each, inside the same script — and takes p50/p95 of
+`finishedOn - processedOn`. With `removeOnComplete: true` there is nothing to read and
+the rule never breaches; with `{ count: N }` the N newest jobs are the ones a recent
+window needs.
 
 `ZCOUNT` over the `completed`/`failed` sorted sets — what this used to do — counts only
 jobs still present in Redis, so any queue using `removeOnComplete` reports a wildly
@@ -92,12 +104,54 @@ other alert.
 
 Consequences worth knowing:
 
-* The counter history is in memory, so a restart means `warming_up` (accumulating
-  history) for one window — never "zero failures".
-* A counter that goes backwards (Redis restarted, queue obliterated) restarts the
-  series rather than reporting a negative delta.
+* A Redis that cannot be read keeps the rule's state (no false "resolved").
+* **Only Workers created with `metrics` are counted.** BullMQ increments the counters
+  inside the finishing Worker's own script call, so if two deployments process the
+  same queue and only one has `metrics`, the other's jobs are never counted and
+  nothing in Redis says so (pinned by `attentionIntegration.test.ts`).
+* **Only final outcomes are counted.** A job that fails an attempt and succeeds on
+  retry is one completed job; retries are invisible to these rules.
+
+**Cost, measured** (500 queues on one connection, one every-queue rule, isolated
+Redis 7, per 15 s tick; one EVALSHA per queue, ~0.3 ms each, so no command blocks):
+
+| Rules | Redis CPU per tick | Share of the interval |
+|---|---|---|
+| failure rate, 15 min | 6.5 ms | 0.04% |
+| + p95 duration (100 jobs read per queue) | 66 ms | 0.44% |
+| + a 24 h window | 161 ms | 1.08% |
+| 24 h + duration | 224 ms | 1.49% |
+
+Cost scales with window length × queues covered, never with job volume. The one
+lever if long windows on many queues ever matter: re-read windows above an hour once
+a minute instead of every tick, since their per-minute data barely moves in 15 s.
 * `getWindowCounts` (ZCOUNT) is retained for panel-side reads, where `retentionSkewed`
   labels it as unreliable. It must not come back into alerting.
+
+## Needs attention is the alert rules, seen on the Overview (Pro)
+
+One rule system, two outputs. An alert is a rule — scope, condition, zero or more
+channels — and every tick the engine measures each rule on each queue it covers. The
+queues that breach are served by `GET /api/attention` from memory (the Overview polls
+it every 5 s at zero Redis cost); the rule as a whole fires and notifies when any of them
+breaches. A rule with no channels is "dashboard only".
+
+Scopes are `queue`, `folder`, `connection` (every discovered queue on one Redis) and
+`global` (every queue on every connection); the wide ones skip hidden queues. **The most
+specific rule wins per condition kind** (queue > folder > connection > global), so
+"failure rate > 5% everywhere, > 30% for the importer" is two rules and the importer is
+judged by the second one only. Rules at the same level all apply. The same precedence
+is applied client-side on the queue page so it never lists a rule that no longer judges
+that queue.
+
+Migration `0008` seeds one dashboard-only global rule (failure rate > 10% over 15 min,
+min 20 finished jobs) on installs with no alerts, so the section has something to say
+on day one.
+
+The free edition keeps the client-side heuristics (`apps/web/src/lib/queueAttention.ts`)
+and the two global thresholds. In Pro the rule findings replace the rate/depth
+heuristics; paused and "backlog with no worker" stay built in, and rank below every rule
+finding because a paused queue is often parked on purpose.
 
 ## Getting from the number to the jobs (deep links + bulk actions)
 

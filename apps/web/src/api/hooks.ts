@@ -11,6 +11,7 @@ import type { z } from "zod";
 import type {
   AddJobInput,
   Alert,
+  AttentionSnapshot,
   AttentionThresholds,
   BulkJobAction,
   BulkJobActionResult,
@@ -183,6 +184,7 @@ export const qk = {
   hiddenQueues: (cid: string) => ["connections", cid, "hidden-queues"] as const,
   folders: ["folders"] as const,
   alerts: ["alerts"] as const,
+  attention: ["attention"] as const,
   alertEvents: (p: { limit?: number; alertId?: string }) => ["alerts", "events", p] as const,
   users: ["users"] as const,
   ssoProviders: ["sso", "providers"] as const,
@@ -797,6 +799,25 @@ export function useAlerts(enabled = true) {
   });
 }
 
+/**
+ * Needs attention in Pro: what the alert rules see, per queue, as of the
+ * server's last tick. Served from memory, so polling it with the queue list
+ * costs nothing on Redis.
+ */
+export function useAttention(enabled = true) {
+  return useQuery({
+    queryKey: qk.attention,
+    queryFn: () => api.get<AttentionSnapshot>("/attention", { silent: [402] }),
+    enabled,
+    refetchInterval: poll(POLL.queues),
+  });
+}
+
+/** The engine re-evaluates right after a rule changes; pick that up without waiting a full poll. */
+function refetchAttentionSoon(qc: ReturnType<typeof useQueryClient>): void {
+  setTimeout(() => void qc.invalidateQueries({ queryKey: qk.attention }), 1_500);
+}
+
 export function useAlertEvents(params: { limit?: number; alertId?: string } = {}, enabled = true) {
   return useQuery({
     queryKey: qk.alertEvents(params),
@@ -811,7 +832,10 @@ export function useCreateAlert() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: CreateAlertInput) => api.post<Alert>("/alerts", input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.alerts }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.alerts });
+      refetchAttentionSoon(qc);
+    },
   });
 }
 
@@ -820,7 +844,10 @@ export function useUpdateAlert() {
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: z.input<typeof updateAlertSchema> }) =>
       api.patch<Alert>(`/alerts/${seg(id)}`, input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.alerts }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.alerts });
+      refetchAttentionSoon(qc);
+    },
   });
 }
 
@@ -828,7 +855,10 @@ export function useDeleteAlert() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.del<{ ok: boolean }>(`/alerts/${seg(id)}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.alerts }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.alerts });
+      refetchAttentionSoon(qc);
+    },
   });
 }
 

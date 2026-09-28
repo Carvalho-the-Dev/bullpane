@@ -35,6 +35,8 @@ export function describeCondition(c: AlertCondition): string {
       return `failed > ${formatNumber(c.threshold)} in ${c.windowMinutes}m`;
     case "failed_rate_above":
       return `failure rate > ${c.percent}% in ${c.windowMinutes}m (min ${c.minSample})`;
+    case "duration_above":
+      return `p${c.percentile} processing > ${c.seconds}s in ${c.windowMinutes}m (min ${c.minSample})`;
   }
 }
 
@@ -155,23 +157,40 @@ function AlertsManager() {
                       <span className="text-fg-subtle"> / </span>
                       <span className="font-mono text-xs">{a.scope.queueName}</span>
                     </>
-                  ) : (
+                  ) : a.scope.type === "folder" ? (
                     <span className="inline-flex items-center gap-1">
                       <Badge variant="outline" size="xs">
                         folder
                       </Badge>
                       {folderName(a.scope.folderId)}
                     </span>
+                  ) : a.scope.type === "connection" ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Badge variant="outline" size="xs">
+                        connection
+                      </Badge>
+                      {connName(a.scope.connectionId)}
+                    </span>
+                  ) : (
+                    <Badge variant="outline" size="xs">
+                      every queue
+                    </Badge>
                   )}
                 </Td>
                 <Td mono>{describeCondition(a.condition)}</Td>
                 <Td muted>
-                  {a.channels.map((c, i) => (
-                    <Badge key={i} variant="outline" size="xs" className="mr-1">
-                      {c.type}
-                    </Badge>
-                  ))}
-                  <span className="text-[11px] text-fg-subtle">· cooldown {a.cooldownMinutes}m</span>
+                  {a.channels.length === 0 ? (
+                    <span className="text-[11px] text-fg-subtle">dashboard only</span>
+                  ) : (
+                    <>
+                      {a.channels.map((c, i) => (
+                        <Badge key={i} variant="outline" size="xs" className="mr-1">
+                          {c.type}
+                        </Badge>
+                      ))}
+                      <span className="text-[11px] text-fg-subtle">· cooldown {a.cooldownMinutes}m</span>
+                    </>
+                  )}
                 </Td>
                 <Td muted>
                   <RelativeTime value={a.lastFiredAt} emptyText="never" />

@@ -11,6 +11,44 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
+## [0.3.0] — 2026-09-27
+
+### Added
+
+- **Needs attention is driven by alert rules (Pro).** Every queue that breaks an
+  enabled rule gets a card at the top of the Overview with the value, the window and
+  the threshold (`26% failed · 15m > 10%`, `p95 4.2s · 15m > 2s`, `674 waiting > 200`).
+  A rule without channels is dashboard only; with Slack or a webhook it also notifies.
+- **Rules scoped to every queue or to a whole connection**, besides one queue and a
+  folder. The most specific rule wins per condition kind, so "5% everywhere, 30% for
+  the importer" is two rules. Hidden queues are skipped by the wide scopes.
+- **Processing time rule** (`duration_above`): p50 or p95 of the jobs completed in the
+  window, from up to the 100 newest completed jobs.
+- A starting dashboard-only rule on installs with no alerts: failure rate above 10%
+  over 15 minutes, on every queue with at least 20 finished jobs.
+- The Overview says how many queues cannot be measured because their Workers keep no
+  BullMQ metrics.
+
+### Changed
+
+- Failure rules read BullMQ's per-minute metrics lists instead of diffing counters in
+  memory: exact to the minute from the first evaluation, so a restart no longer puts
+  every rule in "warming up" for a whole window.
+- In Pro, the free edition's heuristics for failing, deep and failed-pile queues are
+  replaced by the rules; paused and "backlog with no worker" stay built in and rank
+  below rule findings.
+- **Behaviour change for existing alerts:** when a queue rule and a folder rule of the
+  same kind both cover a queue, only the queue rule judges it now.
+
+### Known limits
+
+- Failure rules count only jobs finished by Workers created with
+  `metrics: { maxDataPoints }`. A queue processed by two deployments where only one
+  has `metrics` is undercounted, silently.
+- A job that fails an attempt and succeeds on retry counts as completed.
+- Processing time needs completed jobs to still be in Redis: with
+  `removeOnComplete: true` the rule never fires.
+
 ## [0.2.0] — 2026-09-26
 
 ### Added

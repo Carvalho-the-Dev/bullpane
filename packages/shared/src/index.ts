@@ -1106,9 +1106,10 @@ export const setFolderQueuesSchema = z.object({
  * workloads: a queue that always sits at 5k waiting is healthy, and a queue that
  * never passes 10 is broken at 200 — the same constant cannot serve both.
  *
- * Global on purpose. Per-connection thresholds are the obvious next step, but
- * one pair of numbers already removes the false positives people actually hit,
- * and it needs no migration.
+ * Global on purpose, and the free edition's version of the feature. In Pro the
+ * Overview is driven by the alert rules instead (scoped global / connection /
+ * folder / queue, measured from BullMQ metrics over a window — see
+ * `AttentionSnapshot`), and these two numbers are not used.
  */
 export const attentionThresholdsSchema = z.object({
   /**
@@ -1136,7 +1137,14 @@ export const DEFAULT_ATTENTION_THRESHOLDS: AttentionThresholds = { waitingAbove:
 // Alerts (Pro)
 // ---------------------------------------------------------------------------
 
-export const ALERT_KINDS = ["waiting_above", "failed_above", "failed_rate_above"] as const;
+/**
+ * Upper bound on how many completed jobs a `duration_above` rule reads per
+ * queue per tick (one HMGET each, inside the same Lua call). Enough for a
+ * stable p95; bounded so a global rule over 500 queues stays cheap.
+ */
+export const DURATION_SAMPLE_MAX = 100;
+
+export const ALERT_KINDS = ["waiting_above", "failed_above", "failed_rate_above", "duration_above"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 
 /** Error-rate conditions are measured from BullMQ metrics counters ONLY (see AlertMeasurement). */
@@ -1190,19 +1198,52 @@ export const alertConditionSchema = z.discriminatedUnion("kind", [
     /** ignore windows with fewer finished jobs than this */
     minSample: z.number().int().min(1).default(20),
   }),
+  /**
+   * Processing time (finishedOn - processedOn of the final attempt) of the
+   * jobs that COMPLETED inside the window, at a percentile.
+   *
+   * The one condition BullMQ metrics cannot answer: its counters hold counts,
+   * not durations. So this reads the newest completed jobs still in Redis
+   * (bounded, see DURATION_SAMPLE_MAX). With `removeOnComplete: true` there
+   * is nothing to read and the rule never breaches; with `{ count: N }` the N
+   * newest jobs are exactly the ones a recent window needs.
+   */
+  z.object({
+    kind: z.literal("duration_above"),
+    /** seconds; fractional allowed (0.25 = 250 ms) */
+    seconds: z.number().min(0.001).max(86_400),
+    percentile: z.union([z.literal(50), z.literal(95)]).default(95),
+    windowMinutes: z.number().int().min(1).max(1440).default(15),
+    /** ignore windows with fewer completed jobs than this */
+    minSample: z.number().int().min(1).max(DURATION_SAMPLE_MAX).default(5),
+  }),
 ]);
 export type AlertCondition = z.infer<typeof alertConditionSchema>;
 
 /**
- * What an alert watches. A queue alert measures one queue; a folder alert
- * measures every queue in the folder (across connections) and fires when ANY
- * of them breaches, reporting the worst one.
+ * What an alert watches. A queue alert measures one queue; the wider scopes
+ * measure every queue they contain and fire when ANY of them breaches,
+ * reporting the worst one:
+ *  - `folder`: every queue in the folder, across connections
+ *  - `connection`: every discovered queue on one Redis, except hidden ones
+ *  - `global`: every discovered queue on every connection, except hidden ones
+ *
+ * The most specific rule wins, per condition kind. A queue covered by a global
+ * `failed_rate_above` rule AND a queue-scoped one is judged by the queue rule
+ * only (queue > folder > connection > global); two rules at the same level
+ * both apply. That is what lets "5% everywhere, 30% for the flaky importer"
+ * be two rules instead of fifty.
  */
 export const alertScopeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("queue"), connectionId: z.string().min(1), queueName: z.string().min(1) }),
   z.object({ type: z.literal("folder"), folderId: z.string().min(1) }),
+  z.object({ type: z.literal("connection"), connectionId: z.string().min(1) }),
+  z.object({ type: z.literal("global") }),
 ]);
 export type AlertScope = z.infer<typeof alertScopeSchema>;
+
+/** Override precedence: higher wins for the same (queue, condition kind). */
+export const ALERT_SCOPE_SPECIFICITY: Record<AlertScope["type"], number> = { global: 0, connection: 1, folder: 2, queue: 3 };
 
 export const alertChannelSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("slack"), webhookUrl: z.string().url() }),
@@ -1219,7 +1260,11 @@ export const createAlertSchema = z.object({
   enabled: z.boolean().default(true),
   scope: alertScopeSchema,
   condition: alertConditionSchema,
-  channels: z.array(alertChannelSchema).min(1),
+  /**
+   * Empty = dashboard only: the rule still flags queues in Needs attention and
+   * records fired/resolved events, it just notifies nobody.
+   */
+  channels: z.array(alertChannelSchema).default([]),
   /** minutes to wait before re-notifying the same alert while it stays firing */
   cooldownMinutes: z.number().int().min(1).max(1440).default(30),
 });
@@ -1257,6 +1302,48 @@ export interface AlertEvent {
 
 export const ALERT_EVENT_STATUSES = ["fired", "resolved", "delivery_failed", "no_metrics"] as const;
 export type AlertEventStatus = (typeof ALERT_EVENT_STATUSES)[number];
+
+// ---------------------------------------------------------------------------
+// Needs attention (Pro): what the alert rules see right now, per queue
+// ---------------------------------------------------------------------------
+
+/** Unit of a rule's measured value. `s` is seconds of processing time. */
+export type AlertUnit = "jobs" | "%" | "s";
+
+/** One queue breaking one rule, as of the engine's last tick. */
+export interface AttentionFinding {
+  alertId: string;
+  alertName: string;
+  kind: AlertKind;
+  scopeType: AlertScope["type"];
+  connectionId: string;
+  queueName: string;
+  value: number;
+  threshold: number;
+  unit: AlertUnit;
+  /** null for the waiting gauge */
+  windowMinutes: number | null;
+  /** duration rules only: the percentile the value is */
+  percentile?: 50 | 95;
+  /** false for a dashboard-only rule (no channels) */
+  notifies: boolean;
+}
+
+/** A queue a rule covers but cannot judge, so "nothing flagged" is not read as "healthy". */
+export interface AttentionUnmeasured {
+  connectionId: string;
+  queueName: string;
+  reason: "no_metrics";
+}
+
+export interface AttentionSnapshot {
+  /** ISO time of the tick that produced this; null before the first one */
+  evaluatedAt: string | null;
+  /** enabled rules the engine evaluated */
+  rules: number;
+  findings: AttentionFinding[];
+  unmeasured: AttentionUnmeasured[];
+}
 
 // ---------------------------------------------------------------------------
 // Audit log (Pro)

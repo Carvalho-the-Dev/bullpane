@@ -14,14 +14,29 @@ import type { FoldersService } from "./folders";
 export type UpdateAlertInput = z.infer<typeof updateAlertSchema>;
 
 export function scopeOf(row: Pick<AlertRow, "scopeType" | "connectionId" | "queueName" | "folderId">): AlertScope {
-  if (row.scopeType === "folder") return { type: "folder", folderId: row.folderId ?? "" };
-  return { type: "queue", connectionId: row.connectionId ?? "", queueName: row.queueName ?? "" };
+  switch (row.scopeType) {
+    case "folder":
+      return { type: "folder", folderId: row.folderId ?? "" };
+    case "connection":
+      return { type: "connection", connectionId: row.connectionId ?? "" };
+    case "global":
+      return { type: "global" };
+    default:
+      return { type: "queue", connectionId: row.connectionId ?? "", queueName: row.queueName ?? "" };
+  }
 }
 
 function scopeColumns(scope: AlertScope): Pick<typeof alerts.$inferInsert, "scopeType" | "connectionId" | "queueName" | "folderId"> {
-  return scope.type === "folder"
-    ? { scopeType: "folder", connectionId: null, queueName: null, folderId: scope.folderId }
-    : { scopeType: "queue", connectionId: scope.connectionId, queueName: scope.queueName, folderId: null };
+  switch (scope.type) {
+    case "folder":
+      return { scopeType: "folder", connectionId: null, queueName: null, folderId: scope.folderId };
+    case "connection":
+      return { scopeType: "connection", connectionId: scope.connectionId, queueName: null, folderId: null };
+    case "global":
+      return { scopeType: "global", connectionId: null, queueName: null, folderId: null };
+    case "queue":
+      return { scopeType: "queue", connectionId: scope.connectionId, queueName: scope.queueName, folderId: null };
+  }
 }
 
 export function toAlertDto(row: AlertRow): Alert {
@@ -64,7 +79,7 @@ export class AlertsService {
   /** Throws 404 when the scope points at a missing connection or folder. */
   private async assertScope(scope: AlertScope): Promise<void> {
     if (scope.type === "folder") await this.folders.get(scope.folderId);
-    else await this.connections.getRow(scope.connectionId);
+    else if (scope.type !== "global") await this.connections.getRow(scope.connectionId);
   }
 
   async listRows(opts: { enabledOnly?: boolean } = {}): Promise<AlertRow[]> {

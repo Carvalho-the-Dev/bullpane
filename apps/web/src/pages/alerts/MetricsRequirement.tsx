@@ -145,9 +145,9 @@ export function MeasurementBadge({ measurement }: { measurement: AlertMeasuremen
   }
   if (measurement.state === "warming_up") {
     return (
-      <Tooltip content="Collecting counter history. The alert needs one sample older than its window before it can report a delta — after a server restart this takes one window.">
+      <Tooltip content="Redis could not be read on the last evaluation, so the rule kept its previous state. It measures again on the next tick.">
         <Badge variant="info" dot>
-          <Clock className="size-3" /> warming up
+          <Clock className="size-3" /> waiting for data
         </Badge>
       </Tooltip>
     );
@@ -155,7 +155,7 @@ export function MeasurementBadge({ measurement }: { measurement: AlertMeasuremen
   const partial = measurement.queuesWithoutMetrics?.length ?? 0;
   if (partial > 0) {
     return (
-      <Tooltip content={`Measuring, but ${partial} queue(s) in the folder collect no metrics and are invisible to this alert: ${measurement.queuesWithoutMetrics?.join(", ")}`}>
+      <Tooltip content={`Measuring, but ${partial} queue(s) it covers collect no metrics and are invisible to this rule: ${(measurement.queuesWithoutMetrics ?? []).slice(0, 10).join(", ")}${partial > 10 ? ` and ${partial - 10} more` : ""}`}>
         <Badge variant="warning" dot>
           partial
         </Badge>

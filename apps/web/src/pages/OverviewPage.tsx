@@ -6,7 +6,7 @@ import { formatNumber } from "@/lib/format";
 import { groupQueues, matchesFilter, totals, type QueueEntry } from "@/lib/groupQueues";
 import { splitByAttention } from "@/lib/queueAttention";
 import { useTableState } from "@/lib/useTableState";
-import { useAttentionThresholds, useConnectionOverviews, useFolders } from "@/api/hooks";
+import { useAttention, useAttentionThresholds, useConnectionOverviews, useFolders } from "@/api/hooks";
 import { useAuth } from "@/auth/AuthProvider";
 import { useEdition } from "@/edition/useEdition";
 import { Page, PageHeader } from "@/components/layout/AppShell";
@@ -33,6 +33,9 @@ export function OverviewPage() {
   const { has } = useEdition();
   const { connections, entries, isLoading } = useConnectionOverviews();
   const thresholds = useAttentionThresholds();
+  // Pro: the alert rules drive Needs attention. Free keeps the built-in heuristics.
+  const rulesEnabled = has("alerts");
+  const attention = useAttention(rulesEnabled);
   const foldersEnabled = has("folders");
   const folders = useFolders(foldersEnabled);
   const navigate = useNavigate();
@@ -78,7 +81,15 @@ export function OverviewPage() {
   /** the fleet layout: attention cards on top, the rest folded per connection */
   const dense = connectionCount > CARD_WALL_LIMIT;
 
-  const split = useMemo(() => splitByAttention(visible, thresholds.data), [visible, thresholds.data]);
+  const findings = rulesEnabled ? attention.data?.findings ?? [] : undefined;
+  const split = useMemo(() => splitByAttention(visible, thresholds.data, 8, findings), [visible, thresholds.data, findings]);
+  const rulesInfo = useMemo(() => {
+    if (!rulesEnabled || !attention.data) return undefined;
+    // Count only queues the viewer can see: hidden or filtered-out ones are not their question.
+    const shown = new Set(visible.map((e) => `${e.connection.id}\u0000${e.queue.name}`));
+    const unmeasured = attention.data.unmeasured.filter((u) => shown.has(`${u.connectionId}\u0000${u.queueName}`)).length;
+    return { rules: attention.data.rules, unmeasured };
+  }, [rulesEnabled, attention.data, visible]);
   const restSections = useMemo(
     () => groupQueues(split.rest, foldersEnabled ? folders.data : undefined),
     [split.rest, foldersEnabled, folders.data],
@@ -150,7 +161,7 @@ export function OverviewPage() {
               that repetition is deliberate, the grid is the inventory and this
               is the triage.
             */}
-            <QueueAttentionSection items={split.attention} hidden={split.hidden} showConnection={dense} filtered={!!filter} />
+            <QueueAttentionSection items={split.attention} hidden={split.hidden} showConnection={dense} filtered={!!filter} rules={rulesInfo} />
             {dense ? (
               <CollapsibleQueueGroups sections={restSections} showConnection defaultOpen={false} />
             ) : (

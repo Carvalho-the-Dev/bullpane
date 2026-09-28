@@ -28,8 +28,8 @@ import { describeCondition } from "@/pages/alerts/AlertsPage";
 
 export interface QueueAlertMatch {
   alert: Alert;
-  /** how this queue is covered: named directly, or via a folder */
-  via: { kind: "queue" } | { kind: "folder"; folderId: string; folderName: string };
+  /** how this queue is covered: named directly, via a folder, its connection, or every queue */
+  via: { kind: "queue" } | { kind: "folder"; folderId: string; folderName: string } | { kind: "connection" } | { kind: "global" };
 }
 
 /**
@@ -65,13 +65,27 @@ export function useQueueAlerts(connectionId: string, queueName: string): {
         if (alert.scope.connectionId === connectionId && alert.scope.queueName === queueName) {
           out.push({ alert, via: { kind: "queue" } });
         }
-      } else {
+      } else if (alert.scope.type === "folder") {
         const folderName = covering.get(alert.scope.folderId);
         if (folderName !== undefined) {
           out.push({ alert, via: { kind: "folder", folderId: alert.scope.folderId, folderName } });
         }
+      } else if (alert.scope.type === "connection") {
+        if (alert.scope.connectionId === connectionId) out.push({ alert, via: { kind: "connection" } });
+      } else {
+        out.push({ alert, via: { kind: "global" } });
       }
     }
+    // Most specific wins per condition kind, exactly like the engine: a queue
+    // rule hides the wider ones of the same kind, so they are not listed as
+    // watching a queue they no longer judge.
+    const level = (m: QueueAlertMatch) => ({ global: 0, connection: 1, folder: 2, queue: 3 })[m.via.kind];
+    const best = new Map<string, number>();
+    // Disabled rules are not evaluated, so they override nothing (but are still listed).
+    for (const m of out) if (m.alert.enabled) best.set(m.alert.condition.kind, Math.max(best.get(m.alert.condition.kind) ?? -1, level(m)));
+    const effective = out.filter((m) => !m.alert.enabled || level(m) === best.get(m.alert.condition.kind));
+    out.length = 0;
+    out.push(...effective);
     // firing first, then enabled, then by name
     return out.sort(
       (a, b) =>
@@ -162,6 +176,11 @@ export function QueueAlerts({
 
             <span className="font-mono text-[11px] text-fg-muted">{describeCondition(alert.condition)}</span>
 
+            {(via.kind === "connection" || via.kind === "global") && (
+              <span className="rounded border border-border px-1 text-[10px] text-fg-muted">
+                {via.kind === "global" ? "every queue" : "whole connection"}
+              </span>
+            )}
             {via.kind === "folder" && (
               <Tooltip content="This alert watches every queue in the folder">
                 <Link

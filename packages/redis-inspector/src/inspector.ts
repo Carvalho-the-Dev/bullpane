@@ -73,6 +73,8 @@ import type {
   PingResult,
   QueueStats,
   WindowCounts,
+  WindowMetrics,
+  WindowMetricsRequest,
 } from "./types.js";
 import { errorMessage, globToRegExp, parseRedisInfo, toFloatOrNull, toInt, toIntOrNull, totalKeysFromInfo } from "./util.js";
 
@@ -554,6 +556,50 @@ export class RedisInspector implements Inspector {
       return toIntOrNull(typeof entry[1] === "string" ? entry[1] : null);
     };
     return { completed: read(0), failed: read(1), collectedAt };
+  }
+
+  async getWindowMetrics(
+    requests: WindowMetricsRequest[],
+    opts: { durationSample?: number; now?: number } = {},
+  ): Promise<Record<string, WindowMetrics>> {
+    const out: Record<string, WindowMetrics> = {};
+    if (requests.length === 0) return out;
+    const c = await this.ensureConnected();
+    const now = opts.now ?? Date.now();
+    // Hard ceiling regardless of what the caller asks: each sampled job is one HMGET.
+    const sample = Math.max(1, Math.min(opts.durationSample ?? 100, 100));
+    const args = (r: WindowMetricsRequest) => {
+      const p = queueKeyPrefix(this.config.prefix, r.queue);
+      return [
+        p + QUEUE_KEY.metricsCompleted,
+        p + QUEUE_KEY.metricsFailed,
+        p + QUEUE_KEY.metricsCompletedData,
+        p + QUEUE_KEY.metricsFailedData,
+        stateKey(this.config.prefix, r.queue, "completed"),
+        now,
+        r.rateWindows.join(","),
+        r.durationWindows.join(","),
+        sample,
+        p,
+      ];
+    };
+
+    let replies: Array<LuaReply | null>;
+    if (c instanceof Cluster) {
+      replies = await Promise.all(requests.map((r) => callScript(c, "windowMetrics", args(r)).catch(() => null)));
+    } else {
+      const pipeline = c.pipeline();
+      for (const r of requests) pipelineScript(pipeline, "windowMetrics", args(r));
+      const results = (await pipeline.exec()) ?? [];
+      replies = results.map(([err, reply]) => (err ? null : (reply as LuaReply)));
+    }
+
+    requests.forEach((r, i) => {
+      const reply = replies[i];
+      if (reply === null || reply === undefined) return;
+      out[r.queue] = parseWindowMetrics(reply, r, now);
+    });
+    return out;
   }
 
   async getJobs(
@@ -1288,6 +1334,28 @@ function parseStats(reply: LuaReply, withMetrics: boolean, windowMinutes: number
     stats.metrics = { completed: metricsCompleted, failed: metricsFailed };
   }
   return stats;
+}
+
+function parseWindowMetrics(reply: LuaReply, request: WindowMetricsRequest, collectedAt: number): WindowMetrics {
+  const r = asArray(reply);
+  const rates = asArray(r[1] ?? []).map((v) => asNumber(v));
+  const durs = asArray(r[2] ?? []).map((v) => asNumber(v));
+  return {
+    hasMetrics: asNumber(r[0] ?? 0) === 1,
+    rates: request.rateWindows.map((windowMinutes, i) => ({
+      windowMinutes,
+      completed: rates[i * 3] ?? 0,
+      failed: rates[i * 3 + 1] ?? 0,
+      coveredMinutes: rates[i * 3 + 2] ?? 0,
+    })),
+    durations: request.durationWindows.map((windowMinutes, i) => {
+      const sampled = durs[i * 3] ?? 0;
+      const p50 = durs[i * 3 + 1] ?? -1;
+      const p95 = durs[i * 3 + 2] ?? -1;
+      return { windowMinutes, sampled, p50Ms: sampled > 0 && p50 >= 0 ? p50 : null, p95Ms: sampled > 0 && p95 >= 0 ? p95 : null };
+    }),
+    collectedAt,
+  };
 }
 
 const JOB_STATE_SET = new Set<string>(STATE_ORDER);
