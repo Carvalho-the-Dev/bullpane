@@ -1,0 +1,100 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Bullpane vs QueueDash: BullMQ dashboard comparison</title><meta name="description" content="QueueDash is an MIT dashboard for Bull, BullMQ, Bee-Queue and GroupMQ that embeds in Express, Fastify, Hono or Next.js. Bullpane is a self-hosted dashboard for BullMQ and BullMQ Pro with reads bounded for production Redis and, in Pro, user accounts, roles, SSO and an audit log. Checked September 2026."><meta property="og:title" content="Bullpane vs QueueDash"><meta property="og:type" content="article"><meta property="og:url" content="https://bullpane.com/vs/queuedash"><meta property="og:image" content="https://bullpane.com/shots/overview.jpg"><meta name="twitter:card" content="summary_large_image"><meta property="og:description" content="A multi-library queue UI you embed against a BullMQ-only dashboard built for production Redis and teams. What each one does, checked September 2026."><link rel="canonical" href="https://bullpane.com/vs/queuedash"><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%277%27 fill=%27%230b0d12%27/%3E%3Cpath d=%27M8 8h9a5 5 0 0 1 0 10H8zM8 18h10a5 5 0 0 1 0 10H8z%27 fill=%27%23f5a524%27/%3E%3C/svg%3E"><link rel="stylesheet" href="/styles.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Article",
+      "headline": "Bullpane vs QueueDash: BullMQ dashboard comparison",
+      "url": "https://bullpane.com/vs/queuedash",
+      "dateModified": "2026-09-27",
+      "author": { "@type": "Person", "name": "Matheus Morett", "url": "https://madmorett.com/" },
+      "about": [
+        { "@type": "SoftwareApplication", "name": "Bullpane", "url": "https://bullpane.com/", "applicationCategory": "DeveloperApplication" },
+        { "@type": "SoftwareApplication", "name": "QueueDash", "url": "https://github.com/alexbudure/queuedash", "applicationCategory": "DeveloperApplication" }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "What is the difference between QueueDash and Bullpane?", "acceptedAnswer": { "@type": "Answer", "text": "QueueDash is an MIT dashboard that covers several Node queue libraries (Bull, BullMQ, Bee-Queue, GroupMQ) and embeds in Express, Fastify, Hono, Elysia or Next.js, with a standalone Docker image as well. Bullpane covers BullMQ and BullMQ Pro only, runs as its own container, bounds every read for production Redis, and in its Pro edition adds user accounts with roles, SSO, alerts and an audit log." } },
+        { "@type": "Question", "name": "Does QueueDash have user accounts and roles?", "acceptedAnswer": { "@type": "Answer", "text": "Its v4 README describes an optional built-in login and says it is one shared login, not user accounts, roles or SSO; per-queue access rules apply to everyone who logs in. Bullpane Pro has individual user accounts, admin/operator/viewer roles, SSO over OIDC and SAML 2.0, and an audit log of who did what." } },
+        { "@type": "Question", "name": "Should I use QueueDash or Bullpane for Bee-Queue or GroupMQ?", "acceptedAnswer": { "@type": "Answer", "text": "QueueDash. Bullpane only reads BullMQ and BullMQ Pro." } }
+      ]
+    }
+  ]
+}
+</script>
+</head><body>
+<nav class="nav"><div class="wrap"><a class="logo" href="/"><svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#171b24"/><path d="M8 8h9a5 5 0 0 1 0 10H8zM8 18h10a5 5 0 0 1 0 10H8z" fill="#f5a524"/></svg>Bullpane</a><div class="nav-links"><a href="/">Home</a><a href="/#pricing">Pricing</a><a href="/changelog">Changelog</a></div></div></nav><main class="legal"><div class="wrap">
+<h1>Bullpane vs QueueDash</h1>
+<p class="updated">Checked against QueueDash 3.20 on npm and its v4 main branch on 27 September 2026 · Other comparisons: <a href="/vs/bull-board">bull-board</a> · <a href="/vs/taskforce">Taskforce.sh</a></p>
+
+<p class="lead-sm">QueueDash is a good-looking, MIT-licensed queue UI that speaks several Node queue libraries and drops into the server or Next.js app you already have. Bullpane does one thing: BullMQ and BullMQ Pro, as a standalone container, with every read bounded so it is safe on a busy production Redis, and a Pro edition for teams that need individual accounts, roles and a record of who did what.</p>
+
+<div class="callout">
+<p><strong>Short answer.</strong> Pick QueueDash if you run Bee-Queue, GroupMQ or Bull alongside BullMQ, or want the UI embedded in your Next.js or Hono app. Pick Bullpane if you are on BullMQ or BullMQ Pro, your Redis is busy or your payloads are large, or several people operate the queues and each needs their own login and role.</p>
+</div>
+
+<h2>Side by side</h2>
+<div class="legend"><span><i class="pill yes">✓</i> Included</span><span><i class="pill pro">Pro</i> Bullpane Pro</span><span><i class="pill no">–</i> Not available or not documented</span></div>
+<div class="table-wrap compare">
+<table>
+<thead><tr><th></th><th class="hl"><b>Bullpane</b><small>standalone container</small></th><th><b>QueueDash</b><small>embedded or Docker</small></th></tr></thead>
+<tbody>
+<tr><td>License</td><td class="hl">MIT</td><td>MIT</td></tr>
+<tr><td>BullMQ</td><td class="hl"><i class="pill yes">✓</i><small>4, 5, 6 on Redis, Cluster, Valkey</small></td><td><i class="pill yes">✓</i><small>5.60+ and 6</small></td></tr>
+<tr><td>Bull, Bee-Queue, GroupMQ</td><td class="hl"><i class="pill no">–</i></td><td><i class="pill yes">✓</i></td></tr>
+<tr><td>BullMQ Pro groups</td><td class="hl"><i class="pill yes">✓</i><small>per-group status, concurrency, rate limit</small></td><td><i class="pill no">–</i><small>not documented</small></td></tr>
+<tr><td>Embeds in Express / Fastify / Hono / Next.js</td><td class="hl"><i class="pill no">–</i><small>separate container</small></td><td><i class="pill yes">✓</i></td></tr>
+<tr><td>Queue discovery by scanning Redis</td><td class="hl"><i class="pill yes">✓</i><small>bounded SCAN, cached</small></td><td><i class="pill yes">✓</i><small>Bull and BullMQ</small></td></tr>
+<tr><td>Search inside job data</td><td class="hl"><i class="pill yes">✓</i><small>whole state, bounded and resumable</small></td><td><i class="pill yes">✓</i><small>one status, stops after 5,000 jobs</small></td></tr>
+<tr><td>Payload truncated inside Redis before it is sent</td><td class="hl"><i class="pill yes">✓</i></td><td><i class="pill no">–</i><small>not documented</small></td></tr>
+<tr><td>Flows, schedulers, logs, bulk actions</td><td class="hl"><i class="pill yes">✓</i></td><td><i class="pill yes">✓</i></td></tr>
+<tr><td>Login</td><td class="hl"><i class="pill pro">Pro</i><small>free has none</small></td><td><i class="pill yes">✓</i><small>one shared login, v4 (not on npm yet)</small></td></tr>
+<tr><td>Read-only or hidden queues</td><td class="hl"><i class="pill yes">✓</i><small>global read-only, hidden queues · Pro: per-role</small></td><td><i class="pill yes">✓</i><small>per queue, v4</small></td></tr>
+<tr><td>Redact fields before they reach the browser</td><td class="hl"><i class="pill no">–</i></td><td><i class="pill yes">✓</i><small>v4</small></td></tr>
+<tr><td>Individual user accounts &amp; roles</td><td class="hl"><i class="pill pro">Pro</i></td><td><i class="pill no">–</i><small>self-hosted; cloud has roles</small></td></tr>
+<tr><td>SSO (OIDC, SAML 2.0)</td><td class="hl"><i class="pill pro">Pro</i></td><td><i class="pill no">–</i><small>cloud Enterprise only</small></td></tr>
+<tr><td>Alerts</td><td class="hl"><i class="pill pro">Pro</i><small>Slack, webhook</small></td><td><i class="pill no">–</i><small>self-hosted; cloud from $29/mo</small></td></tr>
+<tr><td>Audit log</td><td class="hl"><i class="pill pro">Pro</i><small>in your database, CSV</small></td><td><i class="pill no">–</i><small>self-hosted; cloud advertises one</small></td></tr>
+<tr class="price-row"><td>Price</td><td class="hl">Free · Pro $39/mo or $390/yr per installation, unlimited users</td><td>Free self-hosted · Cloud $29 / $99 per month, by jobs and members</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Where QueueDash is the better choice</h2>
+<ul>
+<li><strong>More than BullMQ.</strong> Bull 3/4, Bee-Queue and GroupMQ in the same UI. If your stack mixes them, Bullpane only covers the BullMQ part.</li>
+<li><strong>It embeds.</strong> An Express middleware, a Fastify plugin, a Hono adapter, Elysia, or a React component for your Next.js app. Bullpane is always a separate container with its own MySQL.</li>
+<li><strong>Field redaction.</strong> The v4 branch can strip fields from job data before they reach the browser. Bullpane truncates payloads for speed but does not redact them.</li>
+<li><strong>Per-queue access rules without a subscription.</strong> v4 can make each queue full, read-only or hidden and deny single actions, enforced on the server. Bullpane's free edition has one global read-only switch; per-user permissions are Pro.</li>
+</ul>
+<p>The login, access rules and redaction above are on QueueDash's main branch, not in the 3.20 release on npm, as of the date at the top of this page.</p>
+
+<h2>Where Bullpane goes further</h2>
+<h3>Built for BullMQ Pro</h3>
+<p>If you pay for BullMQ Pro, groups are the reason. Bullpane shows each group in Pro's own vocabulary (waiting, limited, maxed, paused), with jobs waiting and how many are prioritized, active jobs against the concurrency cap, the rate limit, and when a limited group comes back into rotation. QueueDash documents GroupMQ groups, a different library, and does not mention BullMQ Pro.</p>
+
+<h3>Reads that stay cheap on a busy Redis</h3>
+<p>Bullpane never runs <code>KEYS</code>, reads each page with one Lua round trip, and truncates payloads inside Redis before they are sent, so a page of 200 jobs with 1&nbsp;MB payloads answers in 7&nbsp;ms. Search walks the whole state in bounded slices with a cursor, so it neither blocks Redis nor gives up at a fixed count; QueueDash's search covers one status and stops after 5,000 jobs. The read rules and a hostile-load test are public in <a href="https://github.com/madmorett/bullpane/blob/main/docs/STRESS-TEST.md" rel="noopener">STRESS-TEST.md</a>.</p>
+
+<h3>Everyone logs in as themselves</h3>
+<p>QueueDash's own README describes its login as &ldquo;one shared login, not user accounts, roles, or SSO&rdquo;. That is fine for a small team; it stops being fine the day someone obliterates a queue and you need to know who. Bullpane Pro has individual accounts, admin/operator/viewer roles on every API call, SSO over OIDC and SAML 2.0, and an append-only audit log with actor, target and IP, all self-hosted. QueueDash sells roles, alerts and SSO in its hosted cloud, which receives job events from an SDK in your app.</p>
+
+<h2>Price</h2>
+<p>QueueDash self-hosted is free. Its cloud is USD 29/month (100K jobs, 10 members) or USD 99/month (1M jobs, 50 members), with SSO on a custom Enterprise plan. Bullpane's free edition is free with no login; Pro is USD 39/month or USD 390/year per installation, with unlimited users, connections and jobs, running entirely in your network.</p>
+
+<h2>Try it on your own queues</h2>
+<p>Bullpane needs nothing from your code: start the container, add your Redis URL and prefix, and it finds the queues. Use <code>BULLPANE_READ_ONLY=true</code> for the first days.</p>
+<p><a class="btn primary" href="/#install">Install the free edition</a> <a class="btn" href="/#pricing">See Pro pricing</a></p>
+
+<h2>Sources</h2>
+<ul>
+<li><a href="https://github.com/alexbudure/queuedash" rel="noopener">QueueDash on GitHub</a>: README on main (v4) and the 3.20 release</li>
+<li><a href="https://www.queuedash.com/pricing" rel="noopener">QueueDash cloud pricing</a></li>
+<li><a href="https://github.com/madmorett/bullpane" rel="noopener">Bullpane on GitHub</a></li>
+</ul>
+<p class="lead-sm" style="margin-top:24px">Something here out of date? Write to <a href="mailto:hello@bullpane.com">hello@bullpane.com</a> and it gets fixed.</p>
+</div></main>
+<footer><div class="wrap"><div>© <span id="y"></span> Bullpane · Built by <a href="https://www.linkedin.com/in/matheusmorett/" rel="noopener">Matheus Morett</a>.</div><div style="display:flex;gap:18px;flex-wrap:wrap"><a href="mailto:hello@bullpane.com">hello@bullpane.com</a><a href="/vs/bull-board">vs bull-board</a><a href="/vs/taskforce">vs Taskforce</a><a href="/vs/queuedash">vs QueueDash</a><a href="/changelog">Changelog</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a></div></div></footer><script>document.getElementById("y").textContent=new Date().getFullYear();</script></body></html>

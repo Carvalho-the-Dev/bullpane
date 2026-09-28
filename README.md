@@ -22,8 +22,9 @@ Works with BullMQ 4, 5 and 6 on Redis, Redis Cluster and Valkey, and with
 BullMQ Pro. The BullMQ 6 PostgreSQL backend is not supported yet; if you run
 it, [say so](mailto:hello@bullpane.com) and it moves up the list.
 
-It exists because the alternatives make you choose. bull-board has a UI from
-2016. Taskforce.sh is hosted, so your job payloads leave your network. Bullpane
+It exists because the alternatives make you choose. bull-board is a viewer:
+no search inside job data, no roles, no alerts. Taskforce.sh is hosted, so your
+job payloads transit its servers, and it is priced per connection. Bullpane
 runs in a single container next to your stack, is free for the core, and
 USD 39/month (or 390/year) unlocks the team features for one installation with
 unlimited users.

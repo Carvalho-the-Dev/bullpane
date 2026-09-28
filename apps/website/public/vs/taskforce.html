@@ -1,0 +1,115 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Bullpane vs Taskforce.sh: BullMQ dashboard comparison</title><meta name="description" content="Taskforce.sh is the hosted BullMQ dashboard from the BullMQ authors, from $19.95/month per connection. Bullpane is a self-hosted BullMQ dashboard: free edition, Pro at $39/month per installation with unlimited connections, roles, SSO and an audit log in your own database. Checked September 2026."><meta property="og:title" content="Bullpane vs Taskforce.sh"><meta property="og:type" content="article"><meta property="og:url" content="https://bullpane.com/vs/taskforce"><meta property="og:image" content="https://bullpane.com/shots/overview.jpg"><meta name="twitter:card" content="summary_large_image"><meta property="og:description" content="The hosted dashboard from the BullMQ authors against a self-hosted one that keeps your job data in your network. Features, data flow and price, checked September 2026."><link rel="canonical" href="https://bullpane.com/vs/taskforce"><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%277%27 fill=%27%230b0d12%27/%3E%3Cpath d=%27M8 8h9a5 5 0 0 1 0 10H8zM8 18h10a5 5 0 0 1 0 10H8z%27 fill=%27%23f5a524%27/%3E%3C/svg%3E"><link rel="stylesheet" href="/styles.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Article",
+      "headline": "Bullpane vs Taskforce.sh: BullMQ dashboard comparison",
+      "url": "https://bullpane.com/vs/taskforce",
+      "dateModified": "2026-09-27",
+      "author": { "@type": "Person", "name": "Matheus Morett", "url": "https://madmorett.com/" },
+      "about": [
+        { "@type": "SoftwareApplication", "name": "Bullpane", "url": "https://bullpane.com/", "applicationCategory": "DeveloperApplication" },
+        { "@type": "SoftwareApplication", "name": "Taskforce.sh", "url": "https://taskforce.sh/", "applicationCategory": "DeveloperApplication" }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "Is there a self-hosted alternative to Taskforce.sh?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Bullpane is a self-hosted dashboard for BullMQ and BullMQ Pro that runs as one container next to your stack. Nothing leaves your network. The free edition covers queues, jobs, search and BullMQ Pro groups; Pro (USD 39/month per installation) adds users and roles, SSO, alerts and an audit log. Taskforce also sells an on-premises edition, priced on request." } },
+        { "@type": "Question", "name": "Does job data leave my network with Taskforce.sh?", "acceptedAnswer": { "@type": "Answer", "text": "With the hosted service, yes, in transit. Either Taskforce's servers connect to your Redis directly, or the taskforce-connector opens a WebSocket from your network to api.taskforce.sh and proxies Redis traffic through it. Taskforce states it never stores job payloads on its servers. With Bullpane, the dashboard runs in your network and job data never leaves it." } },
+        { "@type": "Question", "name": "Which is cheaper, Taskforce.sh or Bullpane?", "acceptedAnswer": { "@type": "Answer", "text": "For one Redis connection, Taskforce Starter is cheaper: USD 19.95/month against Bullpane Pro at USD 39/month. From two connections, or once you need roles, Bullpane is cheaper: Taskforce Growing is USD 49.95/month for 5 connections and Enterprise USD 99.95/month for 15, while Bullpane Pro is USD 39/month for unlimited connections and users. Bullpane also has a free edition with no login." } }
+      ]
+    }
+  ]
+}
+</script>
+</head><body>
+<nav class="nav"><div class="wrap"><a class="logo" href="/"><svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#171b24"/><path d="M8 8h9a5 5 0 0 1 0 10H8zM8 18h10a5 5 0 0 1 0 10H8z" fill="#f5a524"/></svg>Bullpane</a><div class="nav-links"><a href="/">Home</a><a href="/#pricing">Pricing</a><a href="/changelog">Changelog</a></div></div></nav><main class="legal"><div class="wrap">
+<h1>Bullpane vs Taskforce.sh</h1>
+<p class="updated">Checked against taskforce.sh and its docs on 27 September 2026 · Other comparisons: <a href="/vs/bull-board">bull-board</a> · <a href="/vs/queuedash">QueueDash</a></p>
+
+<p class="lead-sm">Taskforce.sh is the hosted BullMQ dashboard made by the team behind BullMQ itself. It is polished, it gets new BullMQ features first, and it monitors as well as displays. Bullpane is the self-hosted option: one container in your network, job data that never leaves it, a free edition with no account, and Pro priced per installation instead of per connection.</p>
+
+<div class="callout">
+<p><strong>Short answer.</strong> Pick Taskforce if a hosted service is fine for your data, you have one Redis and want the lowest monthly price, or you need PagerDuty and email alerts today. Pick Bullpane if job payloads must not leave your network, you have several Redis connections, or you want roles, SSO and an audit log in your own database without a sales call.</p>
+</div>
+
+<h2>Side by side</h2>
+<div class="legend"><span><i class="pill yes">✓</i> Included</span><span><i class="pill pro">Pro</i> Bullpane Pro</span><span><i class="pill no">–</i> Not available or not listed</span></div>
+<div class="table-wrap compare">
+<table>
+<thead><tr><th></th><th class="hl"><b>Bullpane</b><small>self-hosted</small></th><th><b>Taskforce.sh</b><small>hosted SaaS · on-prem on request</small></th></tr></thead>
+<tbody>
+<tr><td>Job data stays in your network</td><td class="hl"><i class="pill yes">✓</i></td><td><i class="pill no">–</i><small>SaaS proxies it through their servers; on-prem keeps it</small></td></tr>
+<tr><td>Redis reachable only from inside your network</td><td class="hl"><i class="pill yes">✓</i></td><td><i class="pill yes">✓</i><small>with the connector</small></td></tr>
+<tr><td>Free edition</td><td class="hl"><i class="pill yes">✓</i><small>no account, no login</small></td><td><i class="pill no">–</i><small>15-day trial</small></td></tr>
+<tr><td>Search inside job data</td><td class="hl"><i class="pill yes">✓</i></td><td><i class="pill yes">✓</i></td></tr>
+<tr><td>BullMQ Pro groups</td><td class="hl"><i class="pill yes">✓</i><small>free edition</small></td><td><i class="pill yes">✓</i><small>needs Connector Pro</small></td></tr>
+<tr><td>Flows</td><td class="hl"><i class="pill yes">✓</i><small>tree per job · Pro: queue graph</small></td><td><i class="pill yes">✓</i></td></tr>
+<tr><td>Metrics history</td><td class="hl"><i class="pill yes">✓</i><small>per-minute, from BullMQ metrics</small></td><td><i class="pill yes">✓</i><small>up to 2 weeks, per minute</small></td></tr>
+<tr><td>Alerts</td><td class="hl"><i class="pill pro">Pro</i><small>Slack, webhook</small></td><td><i class="pill yes">✓</i><small>email, Slack, PagerDuty</small></td></tr>
+<tr><td>Users &amp; roles</td><td class="hl"><i class="pill pro">Pro</i><small>admin / operator / viewer</small></td><td><i class="pill yes">✓</i><small>custom roles from Growing ($49.95)</small></td></tr>
+<tr><td>SSO (OIDC, SAML 2.0)</td><td class="hl"><i class="pill pro">Pro</i></td><td><i class="pill no">–</i><small>not listed</small></td></tr>
+<tr><td>Audit log of user actions, in your own database</td><td class="hl"><i class="pill pro">Pro</i><small>CSV export</small></td><td><i class="pill no">–</i><small>audit trail listed for AI agents</small></td></tr>
+<tr><td>AI agents over MCP</td><td class="hl"><i class="pill no">–</i></td><td><i class="pill yes">✓</i></td></tr>
+<tr><td>Source code</td><td class="hl">MIT, on GitHub</td><td>Closed; connector is MIT</td></tr>
+<tr class="price-row"><td>Price</td><td class="hl">Free · Pro $39/mo or $390/yr, unlimited connections and users</td><td>$19.95/mo for 1 connection · $49.95 for 5 · $99.95 for 15 · unlimited users</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Where Taskforce is the better choice</h2>
+<ul>
+<li><strong>It is made by the BullMQ authors.</strong> New BullMQ and BullMQ Pro features show up there first, and nobody knows BullMQ's internals better.</li>
+<li><strong>Nothing to run.</strong> Sign up, connect a Redis, done. Bullpane is a container and a MySQL database you operate.</li>
+<li><strong>Cheaper for a single Redis.</strong> Starter is USD 19.95/month for one connection with unlimited users and alerts. Bullpane Pro is USD 39/month.</li>
+<li><strong>More alert channels.</strong> Email, Slack and PagerDuty, with monitors for failed jobs, missing workers, backlog, memory and the connection itself. Bullpane Pro alerts go to Slack or any webhook (which reaches PagerDuty through its Events API, but it is not one click).</li>
+<li><strong>An MCP endpoint</strong> so AI agents can investigate and act on queues with scoped tokens. Bullpane has none yet.</li>
+<li><strong>Compliance paperwork.</strong> Taskforce states SOC 2 Type II and GDPR compliance. If your vendor review wants a report, that saves a round.</li>
+</ul>
+
+<h2>Where Bullpane is the better choice</h2>
+<h3>Your job data never leaves your network</h3>
+<p>The hosted Taskforce reaches your queues in one of two ways. Either its servers connect to your Redis directly, from a published IP, which means your Redis accepts connections from the internet and your Redis password is stored on their side. Or you run <code>taskforce-connector</code>, which opens a WebSocket from your network to <code>api.taskforce.sh</code> and proxies Redis traffic through it. Taskforce says it never stores payloads; they still transit its servers. For job data holding personal, financial or health data, that is a vendor-review conversation. Bullpane runs next to your workers and talks to Redis over your private network. No job data goes out and there is no telemetry; the free edition makes no outbound calls at all, and Pro only renews its license with api.bullpane.com (offline keys exist for air-gapped installs).</p>
+<p>Taskforce does sell an on-premises edition. Its price is not published, and it needs PostgreSQL, Redis 7+, Auth0 and Mailgun to run. Bullpane needs MySQL.</p>
+
+<h3>Priced per installation, not per connection</h3>
+<p>Every Redis you want to see (production, staging, each region, each prefix) is a connection. On Taskforce, two to five of them means Growing at USD 49.95/month; up to fifteen, Enterprise at USD 99.95. Bullpane Pro is USD 39/month or USD 390/year for one installation with unlimited connections and unlimited users. And the free edition, with every read and every job action, costs nothing and has no trial clock.</p>
+
+<h3>The team features in one plan</h3>
+<p>Bullpane Pro includes user accounts with admin/operator/viewer roles enforced on every API call, SSO over OIDC and SAML 2.0 that your own admin configures in the UI, and an append-only audit log of who retried, drained, paused or obliterated what, from which IP, stored in your database and exportable to CSV. On Taskforce, custom roles start at the Growing plan; SSO and a user audit log are not listed on its pricing page.</p>
+
+<h3>Open source</h3>
+<p>Bullpane is MIT. You can read every Redis command it sends before you point it at production, and it keeps working if the company behind it stops. Its read rules (no <code>KEYS</code>, one Lua round trip per read, payloads truncated inside Redis) are documented and load-tested in <a href="https://github.com/madmorett/bullpane/blob/main/docs/STRESS-TEST.md" rel="noopener">STRESS-TEST.md</a>.</p>
+
+<h2>Price for the same setup</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Setup</th><th>Bullpane</th><th>Taskforce.sh</th></tr></thead>
+<tbody>
+<tr><td>1 Redis, a viewer is enough</td><td>$0 (free edition)</td><td>$19.95/mo</td></tr>
+<tr><td>1 Redis, alerts, team</td><td>$39/mo</td><td>$19.95/mo</td></tr>
+<tr><td>Prod + staging, custom roles</td><td>$39/mo</td><td>$49.95/mo</td></tr>
+<tr><td>6 to 15 connections</td><td>$39/mo</td><td>$99.95/mo</td></tr>
+<tr><td>Yearly, 5 connections</td><td>$390/yr</td><td>$495/yr</td></tr>
+</tbody>
+</table>
+</div>
+<p style="margin-top:12px">Taskforce prices from the pricing section of taskforce.sh on 27 September 2026, in USD. On Taskforce Starter, roles are not included.</p>
+
+<h2>Try it on your own queues</h2>
+<p>Start Bullpane next to your workers with <code>BULLPANE_READ_ONLY=true</code> and point it at the same Redis Taskforce already watches. They do not interfere.</p>
+<p><a class="btn primary" href="/#install">Install the free edition</a> <a class="btn" href="/#pricing">See Pro pricing</a></p>
+
+<h2>Sources</h2>
+<ul>
+<li><a href="https://taskforce.sh/" rel="noopener">taskforce.sh</a>: pricing and FAQ</li>
+<li>Taskforce docs: <a href="https://docs.taskforce.sh/getting-started/direct-redis-connection" rel="noopener">direct Redis connection</a>, <a href="https://docs.taskforce.sh/getting-started/taskforce-connector" rel="noopener">connector</a>, <a href="https://docs.taskforce.sh/on-premises/docker" rel="noopener">on-premises</a>, <a href="https://docs.taskforce.sh/metrics" rel="noopener">metrics</a>, <a href="https://docs.taskforce.sh/bullmq-pro/connector-pro" rel="noopener">Connector Pro</a></li>
+<li><a href="https://github.com/taskforcesh/taskforce-connector" rel="noopener">taskforce-connector on GitHub</a></li>
+<li><a href="https://github.com/madmorett/bullpane" rel="noopener">Bullpane on GitHub</a></li>
+</ul>
+<p class="lead-sm" style="margin-top:24px">Something here out of date? Write to <a href="mailto:hello@bullpane.com">hello@bullpane.com</a> and it gets fixed.</p>
+</div></main>
+<footer><div class="wrap"><div>© <span id="y"></span> Bullpane · Built by <a href="https://www.linkedin.com/in/matheusmorett/" rel="noopener">Matheus Morett</a>.</div><div style="display:flex;gap:18px;flex-wrap:wrap"><a href="mailto:hello@bullpane.com">hello@bullpane.com</a><a href="/vs/bull-board">vs bull-board</a><a href="/vs/taskforce">vs Taskforce</a><a href="/vs/queuedash">vs QueueDash</a><a href="/changelog">Changelog</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a></div></div></footer><script>document.getElementById("y").textContent=new Date().getFullYear();</script></body></html>

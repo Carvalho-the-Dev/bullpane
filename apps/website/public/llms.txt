@@ -11,6 +11,14 @@ Built by Matheus Morett (CTO at Monest, 100M+ BullMQ jobs a day in production). 
 - A team needs roles, SSO or an audit trail of who retried, drained or paused what.
 - BullMQ Pro users who want to see groups (waiting / limited / maxed / paused, per-group concurrency and rate limits).
 
+## When another tool fits better
+
+- bull-board: the dashboard should be mounted inside an existing Express/Fastify/NestJS/Hono app behind that app's auth, or the queues are Bull 3/4, or BullMQ 6 runs on its PostgreSQL backend.
+- Taskforce.sh: a hosted service is acceptable, there is a single Redis connection (USD 19.95/month), or PagerDuty/email alerts or an MCP endpoint are needed today.
+- QueueDash: the stack mixes Bee-Queue, GroupMQ or Bull with BullMQ, or the UI should be embedded in a Next.js app.
+
+Detailed, sourced comparisons (checked September 2026): https://bullpane.com/vs/bull-board · https://bullpane.com/vs/taskforce · https://bullpane.com/vs/queuedash
+
 ## Compatibility
 
 BullMQ 4, 5 and 6 on Redis, Redis Cluster and Valkey; BullMQ Pro (groups, per-group concurrency and rate limits). The BullMQ 6 PostgreSQL backend is not supported yet. Reads never use `KEYS`; writes go through the official `bullmq` client.
@@ -35,6 +43,9 @@ Pro: login and roles (admin / operator / viewer, enforced on every API call; use
 
 - [Website](https://bullpane.com): product, pricing, FAQ
 - [Changelog](https://bullpane.com/changelog)
+- [Bullpane vs bull-board](https://bullpane.com/vs/bull-board)
+- [Bullpane vs Taskforce.sh](https://bullpane.com/vs/taskforce)
+- [Bullpane vs QueueDash](https://bullpane.com/vs/queuedash)
 - [Source on GitHub](https://github.com/madmorett/bullpane): MIT, issues and pull requests welcome
 - [README](https://github.com/madmorett/bullpane/blob/main/README.md): quick start, free vs Pro table, project layout
 - [Architecture](https://github.com/madmorett/bullpane/blob/main/docs/ARCHITECTURE.md): how reads stay cheap, editions and gating, the audit log design

@@ -84,7 +84,7 @@ docker run -d --name bullpane -p 3000:3000 \
   <div class="wrap">
     <span class="kicker">01 / Compare</span>
     <h2>Bullpane vs bull-board vs Taskforce.sh</h2>
-    <p class="sub">bull-board is free but its UI is from 2016 and it stops at the basics. Taskforce.sh is the hosted dashboard from the BullMQ authors: polished, but your job data leaves your network and you pay per connection. Bullpane is the third option: self-hosted, safe on production, priced per installation — free to run, and Pro when you need it behind a login.</p>
+    <p class="sub">bull-board is free and embeds in your app, but it is a viewer: no search inside job data, no roles, no alerts. Taskforce.sh is the hosted dashboard from the BullMQ authors: polished, but your job data transits their servers and you pay per connection. Bullpane is the third option: self-hosted, safe on production, priced per installation — free to run, and Pro when you need it behind a login. Detailed comparisons: <a href="/vs/bull-board">vs bull-board</a> · <a href="/vs/taskforce">vs Taskforce.sh</a> · <a href="/vs/queuedash">vs QueueDash</a>.</p>
     <div class="legend"><span><i class="pill yes">✓</i> Included</span><span><i class="pill pro">Pro</i> Included in Bullpane Pro</span><span><i class="pill no">–</i> Not available</span></div>
     <div class="table-wrap compare">
       <table>
@@ -93,19 +93,19 @@ docker run -d --name bullpane -p 3000:3000 \
             <th></th>
             <th class="hl"><b>Bullpane</b><small>self-hosted</small></th>
             <th><b>bull-board</b><small>open source</small></th>
-            <th><b>Taskforce.sh</b><small>hosted SaaS</small></th>
+            <th><b>Taskforce.sh</b><small>hosted SaaS · on-prem on request</small></th>
           </tr>
         </thead>
         <tbody>
-          <tr><td>Job data stays in your network</td><td class="hl"><i class="pill yes">✓</i></td><td><i class="pill yes">✓</i></td><td><i class="pill no">–</i><small>payloads go to their cloud</small></td></tr>
-          <tr><td>Login</td><td class="hl"><i class="pill pro">Pro</i></td><td><i class="pill no">–</i></td><td><i class="pill yes">✓</i></td></tr>
-          <tr><td>Users &amp; roles</td><td class="hl"><i class="pill pro">Pro</i></td><td><i class="pill no">–</i></td><td><i class="pill yes">✓</i></td></tr>
+          <tr><td>Job data stays in your network</td><td class="hl"><i class="pill yes">✓</i></td><td><i class="pill yes">✓</i></td><td><i class="pill no">–</i><small>proxied through their servers</small></td></tr>
+          <tr><td>Login</td><td class="hl"><i class="pill pro">Pro</i></td><td><i class="pill yes">✓</i><small>one shared basic-auth user</small></td><td><i class="pill yes">✓</i></td></tr>
+          <tr><td>Users &amp; roles</td><td class="hl"><i class="pill pro">Pro</i></td><td><i class="pill no">–</i></td><td><i class="pill yes">✓</i><small>roles from the $49.95 plan</small></td></tr>
           <tr><td>Search inside job data</td><td class="hl"><i class="pill yes">✓</i></td><td><i class="pill no">–</i></td><td><i class="pill yes">✓</i></td></tr>
-          <tr><td>BullMQ Pro groups, per-group concurrency &amp; rate limits</td><td class="hl"><i class="pill yes">✓</i></td><td><i class="pill no">–</i></td><td><i class="pill yes">✓</i></td></tr>
+          <tr><td>BullMQ Pro groups, per-group concurrency &amp; rate limits</td><td class="hl"><i class="pill yes">✓</i></td><td><i class="pill no">–</i><small>group jobs in counts only</small></td><td><i class="pill yes">✓</i></td></tr>
           <tr><td>Alerts to Slack / webhook</td><td class="hl"><i class="pill pro">Pro</i></td><td><i class="pill no">–</i></td><td><i class="pill yes">✓</i></td></tr>
-          <tr><td>Audit log in your own database</td><td class="hl"><i class="pill pro">Pro</i></td><td><i class="pill no">–</i></td><td><i class="pill no">–</i><small>lives in their account</small></td></tr>
-          <tr><td>Flow graph</td><td class="hl"><i class="pill pro">Pro</i></td><td><i class="pill no">–</i></td><td><i class="pill yes">✓</i></td></tr>
-          <tr class="price-row"><td>Price</td><td class="hl">Free · Pro <s>$49</s> <b>$39/mo</b> per installation</td><td>Free</td><td>Monthly, per connection</td></tr>
+          <tr><td>Audit log in your own database</td><td class="hl"><i class="pill pro">Pro</i></td><td><i class="pill no">–</i></td><td><i class="pill no">–</i><small>not listed for users</small></td></tr>
+          <tr><td>Flows</td><td class="hl"><i class="pill yes">✓</i><small>tree per job · Pro: queue graph</small></td><td><i class="pill yes">✓</i><small>tree per job</small></td><td><i class="pill yes">✓</i></td></tr>
+          <tr class="price-row"><td>Price</td><td class="hl">Free · Pro <b>$39/mo</b> per installation</td><td>Free</td><td>From $19.95/mo, per connection</td></tr>
         </tbody>
       </table>
     </div>
@@ -271,7 +271,6 @@ docker run -d --name bullpane -p 3000:3000 \
     <span class="kicker">04 / Pricing</span>
     <h2>Pricing</h2>
     <p class="sub">Per installation, not per connection, not per seat. Taxes and invoices are handled by Creem, our merchant of record. <a href="/refunds" style="color:var(--green);border-bottom:1px solid rgba(62,207,142,.4)">14-day refund</a> on your first payment, and the free edition never expires.</p>
-    <p class="launch"><span class="launch-tag">Launch price</span><span>The first 100 installations pay <b>$39</b> instead of $49 a month, or <b>$390</b> instead of $490 a year. The price you sign up at is the price you keep for as long as you stay subscribed.</span></p>
     <div class="pricing">
       <div class="card plan">
         <h3>Free</h3>
@@ -288,8 +287,8 @@ docker run -d --name bullpane -p 3000:3000 \
       </div>
       <div class="card plan pro">
         <h3>Pro · monthly</h3>
-        <div class="price"><s>$49</s> $39 <small>/ month</small></div>
-        <span class="save">Launch price · locked in while you stay subscribed</span>
+        <div class="price">$39 <small>/ month</small></div>
+        <span class="save">Cancel anytime</span>
         <ul>
           <li>Everything in Free</li>
           <li>Alerts to Slack / webhook</li>
@@ -305,8 +304,8 @@ docker run -d --name bullpane -p 3000:3000 \
       </div>
       <div class="card plan pro">
         <h3>Pro · yearly</h3>
-        <div class="price"><s>$490</s> $390 <small>/ year</small></div>
-        <span class="save">Launch price · 12 months for the price of 10</span>
+        <div class="price">$390 <small>/ year</small></div>
+        <span class="save">12 months for the price of 10</span>
         <ul>
           <li>Everything in Pro monthly</li>
           <li>One invoice a year for procurement</li>
@@ -375,6 +374,9 @@ docker run -d --name bullpane -p 3000:3000 \
         <a href="https://www.linkedin.com/in/matheusmorett/" rel="noopener">LinkedIn</a>
         <a href="https://github.com/madmorett/bullpane" rel="noopener">GitHub</a>
         <a href="/changelog">Changelog</a>
+        <a href="/vs/bull-board">vs bull-board</a>
+        <a href="/vs/taskforce">vs Taskforce</a>
+        <a href="/vs/queuedash">vs QueueDash</a>
         <a href="/terms">Terms</a>
         <a href="/privacy">Privacy</a>
         <a href="/refunds">Refunds</a>

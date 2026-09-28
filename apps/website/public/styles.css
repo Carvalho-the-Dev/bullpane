@@ -139,10 +139,6 @@ td.w { color: var(--red); }
 .plan .ask { font-size: 12.5px; color: var(--fg-subtle); text-align: center; }
 .plan .ask a { color: var(--fg-muted); border-bottom: 1px solid var(--border); }
 .price-row s { color: var(--fg-subtle); margin-right: 2px; }
-.launch { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin: -20px 0 28px; padding: 12px 16px; border: 1px solid rgba(245,165,36,.35); background: rgba(245,165,36,.06); border-radius: 12px; font-size: 14.5px; color: var(--fg-muted); }
-.launch b { color: var(--fg); }
-.launch > span:last-child { flex: 1 1 320px; }
-.launch-tag { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; color: var(--accent-fg); background: var(--accent); border-radius: 999px; padding: 3px 9px; }
 .talk .sub { max-width: 720px; }
 .talk-grid { display: grid; gap: 14px; grid-template-columns: repeat(3, 1fr); }
 .talk-card { display: flex; flex-direction: column; gap: 6px; padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-2); color: var(--fg); transition: border-color .15s ease, transform .08s ease; }
