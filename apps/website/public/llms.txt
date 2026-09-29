@@ -42,6 +42,7 @@ Pro: login and roles (admin / operator / viewer, enforced on every API call; use
 ## Links
 
 - [Website](https://bullpane.com): product, pricing, FAQ
+- [Live demo](https://demo.bullpane.com): the free edition, read-only, against a simulated busy Redis; no login
 - [Changelog](https://bullpane.com/changelog)
 - [Bullpane vs bull-board](https://bullpane.com/vs/bull-board)
 - [Bullpane vs Taskforce.sh](https://bullpane.com/vs/taskforce)

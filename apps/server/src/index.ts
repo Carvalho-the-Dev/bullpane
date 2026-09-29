@@ -1,6 +1,6 @@
 /**
- * Process entry point: config → MySQL (wait + migrate) → app → seed (demo) →
- * listen → alerts engine. Graceful shutdown on SIGINT/SIGTERM.
+ * Process entry point: config → MySQL (wait + migrate) → app → seed
+ * (BULLPANE_CONNECTIONS, demo) → listen → alerts engine. Graceful shutdown on SIGINT/SIGTERM.
  */
 import { createInspectorPool } from "@bullpane/redis-inspector";
 import { buildApp } from "./app";
@@ -8,6 +8,7 @@ import { loadConfig } from "./config";
 import { createDatabase, waitForDatabase } from "./db";
 import { runMigrations } from "./db/migrate";
 import { seedDemo } from "./demo/seed";
+import { seedConnections } from "./seedConnections";
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env, { warn: (m) => console.warn(`[config] ${m}`) });
@@ -25,6 +26,7 @@ async function main(): Promise<void> {
   if (applied.length) log.info({ applied }, "migrations applied");
 
   const edition = await app.ctx.edition.load();
+  await seedConnections(app.ctx.connections, config.seedConnections, log);
   if (config.demoMode) await seedDemo(app.ctx, log);
   await app.ctx.sessions.purgeExpired().catch(() => undefined);
 

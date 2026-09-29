@@ -4,7 +4,7 @@
 
 **A fast, self-hosted dashboard for [BullMQ](https://bullmq.io) and BullMQ Pro.**
 
-[bullpane.com](https://bullpane.com) · [Documentation](docs/) · [Changelog](CHANGELOG.md) · [llms.txt](https://bullpane.com/llms.txt)
+[bullpane.com](https://bullpane.com) · [Live demo](https://demo.bullpane.com) · [Documentation](docs/) · [Changelog](CHANGELOG.md) · [llms.txt](https://bullpane.com/llms.txt)
 
 <img src="https://bullpane.com/shots/overview.jpg" alt="Bullpane overview: every queue of a connection with counts, rates and the ones that need attention" width="880">
 

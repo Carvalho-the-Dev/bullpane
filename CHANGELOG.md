@@ -11,6 +11,15 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
+## [Unreleased]
+
+### Added
+
+- **`BULLPANE_CONNECTIONS`**: a JSON array of Redis connections created at boot
+  when no connection of that name exists. Never overwrites a connection edited in
+  the UI, works in read-only mode, and a bad entry fails the boot naming the field
+  without printing the URL. For installs configured only by environment.
+
 ## [0.3.0] — 2026-09-27
 
 ### Added

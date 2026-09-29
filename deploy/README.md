@@ -63,6 +63,21 @@ activate a Pro key, which brings login, roles and the audit log back.
 untouched. The first time you point the dashboard at a busy production Redis,
 run it this way for a few days. See `ecs/REDIS-SAFETY.md`.
 
+## Connections from the environment
+
+`BULLPANE_CONNECTIONS` takes a JSON array and creates each connection at boot
+when none of that name exists yet. Existing connections are never changed, so
+edits made in the UI survive restarts. It works in read-only mode too, which
+makes an install configured entirely by environment (Helm, Terraform, ECS) need
+no click at all:
+
+```sh
+BULLPANE_CONNECTIONS='[{"name":"Production","url":"rediss://:<PASSWORD>@<HOST>:6379","prefix":"bull","cluster":false}]'
+```
+
+A malformed entry stops the boot with the index and field at fault; the URL is
+never printed.
+
 ## Files
 
 - `install-ec2.sh` — installs Docker, generates passwords and brings up app + MySQL on an EC2 box

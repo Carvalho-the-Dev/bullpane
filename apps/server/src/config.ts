@@ -5,6 +5,7 @@
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { type CreateConnectionInput, createConnectionSchema } from "@bullpane/shared";
 
 /** apps/server (the package root), resolved from src/ or dist/ alike. */
 export const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -42,6 +43,15 @@ export interface Config {
    * Meant for pointing the dashboard at production before you trust it.
    */
   readOnly: boolean;
+  /**
+   * BULLPANE_CONNECTIONS: a JSON array of connections created at boot when no
+   * connection of that name exists yet, e.g.
+   * `[{"name":"Production","url":"redis://redis:6379","prefix":"bull"}]`.
+   * Existing connections are never changed, so edits made in the UI survive a
+   * restart. It is how an install configured only by environment (Helm,
+   * Terraform, a read-only public demo) gets its Redis without a click.
+   */
+  seedConnections: CreateConnectionInput[];
   demoRedisUrl: string;
   demoAdminEmail: string;
   demoAdminPassword: string;
@@ -92,6 +102,34 @@ function bool(env: NodeJS.ProcessEnv, key: string, fallback: boolean): boolean {
   const raw = env[key];
   if (raw === undefined || raw === "") return fallback;
   return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
+}
+
+/**
+ * The error names the entry and the field, never the value: the value is a Redis
+ * URL and may carry a password, which must not end up in a boot log.
+ */
+function connections(env: NodeJS.ProcessEnv, key: string): CreateConnectionInput[] {
+  const raw = env[key];
+  if (raw === undefined || raw.trim() === "") return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`Invalid ${key}: expected a JSON array of connections`);
+  }
+  if (!Array.isArray(parsed)) throw new Error(`Invalid ${key}: expected a JSON array of connections`);
+  const names = new Set<string>();
+  return parsed.map((entry, i) => {
+    const result = createConnectionSchema.safeParse(entry);
+    if (!result.success) {
+      const issue = result.error.issues[0];
+      const field = issue?.path.join(".") || "entry";
+      throw new Error(`Invalid ${key}[${i}].${field}: ${issue?.message ?? "invalid"}`);
+    }
+    if (names.has(result.data.name)) throw new Error(`Invalid ${key}[${i}].name: duplicated`);
+    names.add(result.data.name);
+    return result.data;
+  });
 }
 
 export interface LoadConfigOptions {
@@ -159,6 +197,7 @@ export function loadConfig(rawEnv: NodeJS.ProcessEnv = process.env, opts: LoadCo
     demoMode,
     allowPasswordLogin: bool(env, "BULLPANE_ALLOW_PASSWORD_LOGIN", false),
     readOnly: bool(env, "BULLPANE_READ_ONLY", false),
+    seedConnections: connections(env, "BULLPANE_CONNECTIONS"),
     demoRedisUrl: str(env, "DEMO_REDIS_URL", "redis://localhost:6379"),
     demoAdminEmail: str(env, "DEMO_ADMIN_EMAIL", "demo@bullpane.com"),
     demoAdminPassword: str(env, "DEMO_ADMIN_PASSWORD", "demo1234"),
