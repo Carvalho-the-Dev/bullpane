@@ -49,20 +49,19 @@ export function shuffle<T>(list: readonly T[]): T[] {
   return out;
 }
 
-const FIRST = [
-  "Ana", "Bruno", "Carla", "Diego", "Elena", "Felipe", "Gabriela", "Hugo", "Isabela", "João",
-  "Karen", "Lucas", "Mariana", "Nathan", "Olivia", "Pedro", "Quinn", "Rafael", "Sofia", "Thiago",
-  "Ursula", "Victor", "Wendy", "Xavier", "Yara", "Zoe", "Emma", "Liam", "Noah", "Mia",
-];
-const LAST = [
-  "Silva", "Santos", "Oliveira", "Souza", "Costa", "Pereira", "Almeida", "Nascimento", "Lima",
-  "Araújo", "Smith", "Johnson", "Brown", "Garcia", "Martinez", "Müller", "Rossi", "Kowalski",
-  "Nakamura", "Okafor",
-];
-const DOMAINS = [
-  "gmail.com", "outlook.com", "yahoo.com", "proton.me", "acme.io", "globex.com", "initech.net",
-  "umbrella.corp", "hooli.xyz", "piedpiper.dev", "stark.industries", "wayne.enterprises",
-];
+/**
+ * Everything person-shaped is redacted at the source: the public demo shows
+ * these payloads to anyone, and realistic names, emails or phone numbers read
+ * as leaked PII even when they are invented. Values keep their shape (a masked
+ * email still looks like an email) so the job list stays believable.
+ */
+const INITIALS = "ABCDEFGHIJKLMNOPRSTVWZ";
+// RFC 2606 reserved domains: guaranteed never to belong to anyone.
+const DOMAINS = ["example.com", "example.org", "example.net"];
+
+function initial(): string {
+  return pick(INITIALS.split(""));
+}
 
 export const TENANTS = [
   "tenant-acme", "tenant-globex", "tenant-initech", "tenant-umbrella", "tenant-hooli",
@@ -75,24 +74,26 @@ export function tenant(): TenantId {
   return pick(TENANTS);
 }
 
+/** Masked first name, e.g. `M***`. */
 export function firstName(): string {
-  return pick(FIRST);
+  return `${initial()}***`;
 }
 
+/** Masked full name, e.g. `M*** S***`. */
 export function fullName(): string {
-  return `${pick(FIRST)} ${pick(LAST)}`;
+  return `${initial()}*** ${initial()}***`;
 }
 
+/** Masked email on a reserved domain, e.g. `m***.s***@example.com`. */
 export function email(): string {
-  const f = pick(FIRST).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-  const l = pick(LAST).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-  const sep = pick([".", "_", ""]);
-  const num = chance(0.4) ? int(1, 99) : "";
-  return `${f}${sep}${l}${num}@${pick(DOMAINS)}`;
+  const f = initial().toLowerCase();
+  const l = initial().toLowerCase();
+  return `${f}***.${l}***@${pick(DOMAINS)}`;
 }
 
+/** Masked phone number: only the last four digits survive. */
 export function phone(): string {
-  return `+55 ${int(11, 99)} 9${int(1000, 9999)}-${int(1000, 9999)}`;
+  return `+55 ** *****-${int(1000, 9999)}`;
 }
 
 /** Money amount in cents, skewed toward small values like a real ledger. */
@@ -116,8 +117,9 @@ export function uuid(): string {
   return crypto.randomUUID();
 }
 
+/** An address from the RFC 5737 documentation ranges, never a routable host. */
 export function ipv4(): string {
-  return `${int(1, 223)}.${int(0, 255)}.${int(0, 255)}.${int(1, 254)}`;
+  return `${pick(["192.0.2", "198.51.100", "203.0.113"])}.${int(1, 254)}`;
 }
 
 const WORDS =

@@ -28,7 +28,7 @@ export async function startNotifications(ctx: SimContext): Promise<void> {
         messageId: R.id("msg"),
         tenantId: R.tenant(),
         to: R.email(),
-        from: `no-reply@${R.pick(["acme.io", "globex.com", "initech.net"])}`,
+        from: `no-reply@${R.pick(["example.com", "example.org", "example.net"])}`,
         subject: R.sentence(R.int(3, 7)).replace(/\.$/, ""),
         template,
         locale: R.pick(["pt-BR", "en-US", "es-MX"]),
