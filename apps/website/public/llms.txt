@@ -48,6 +48,7 @@ Pro: login and roles (admin / operator / viewer, enforced on every API call; use
 - [Changelog](https://bullpane.com/changelog)
 - [How to build a dashboard to monitor BullMQ](https://bullpane.com/guides/bullmq-monitoring-dashboard)
 - [Alerting on a BullMQ backlog before it hurts your throughput](https://bullpane.com/guides/bullmq-backlog-alerts)
+- [Monitoring BullMQ on Postgres](https://bullpane.com/guides/bullmq-postgres-monitoring)
 - [BullMQ stalled jobs: what they are and how to find them](https://bullpane.com/guides/bullmq-stalled-jobs)
 - [Promoting a BullMQ job scheduler job skips the next run](https://bullpane.com/guides/bullmq-job-scheduler-promote)
 - [Bullpane vs bull-board](https://bullpane.com/vs/bull-board)

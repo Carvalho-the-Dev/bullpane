@@ -44,7 +44,7 @@
 <tr><td>Jobs by state</td><td>The baseline: waiting, active, delayed, failed, completed, prioritized, paused.</td><td><code>queue.getJobCounts()</code></td><td>One Lua script, an <code>LLEN</code> or <code>ZCARD</code> per state.</td></tr>
 <tr><td>Throughput</td><td>Whether the queue keeps up. Counts cannot answer this.</td><td><code>getMetrics("completed")</code>, see the trap below</td><td>Cheap with a bounded range.</td></tr>
 <tr><td>Failure rate</td><td>Failures over finished jobs in a window, not the size of the <code>failed</code> set.</td><td><code>getMetrics("failed")</code> against <code>getMetrics("completed")</code></td><td>Same.</td></tr>
-<tr><td>Oldest waiting job</td><td>The delay your users feel. The best single latency number.</td><td><code>queue.getJobs(["wait"], 0, 0, true)</code></td><td>One job.</td></tr>
+<tr><td>Oldest waiting job</td><td>The delay your users feel. The best single latency number.</td><td><code>queue.getJobs(["wait"], n - 1, n - 1)</code>, n = waiting count (<a href="/guides/bullmq-backlog-alerts">why not <code>asc</code></a>)</td><td>One job.</td></tr>
 <tr><td>Stalled jobs</td><td>Active jobs whose worker is gone. Invisible in the states. <a href="/guides/bullmq-stalled-jobs">Guide</a></td><td><code>SCARD &lt;prefix&gt;:&lt;queue&gt;:stalled</code>, <code>job.stalledCounter</code></td><td>O(1).</td></tr>
 <tr><td>Paused</td><td>A paused queue has a growing backlog on purpose. Do not alert on it.</td><td><code>queue.isPaused()</code></td><td>O(1).</td></tr>
 <tr><td>Workers connected</td><td>Zero workers and a backlog is an outage.</td><td><code>queue.getWorkersCount()</code></td><td><code>CLIENT LIST</code>; some managed Redis services block it.</td></tr>
@@ -52,6 +52,7 @@
 </tbody>
 </table>
 </div>
+<p>Running BullMQ 6 on Postgres instead of Redis? The signals are the same, the reads are not: see <a href="/guides/bullmq-postgres-monitoring">Monitoring BullMQ on Postgres</a>.</p>
 <p>BullMQ itself checks the eviction policy when it connects and prints <code>IMPORTANT! Eviction policy is allkeys-lru. It should be "noeviction"</code>. That warning scrolls by once in a log. A dashboard should keep it on screen.</p>
 
 <h2>The metrics trap: <code>data</code> is empty</h2>
