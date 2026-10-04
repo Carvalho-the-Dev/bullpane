@@ -85,6 +85,13 @@ function fakeInspector() {
     ping: vi.fn(async () => ({ ok: true, latencyMs: 1, redisVersion: "7.2.0", error: null })),
     discoverQueues: vi.fn(async () => ["payments"]),
     getQueueStats: vi.fn(async () => ({})),
+    // "sched-*" ids stand for a job scheduler's delayed job
+    promoteJob: vi.fn(async (_queue: string, jobId: string, scheduler = "run_copy") => {
+      if (!jobId.startsWith("sched-")) return { mode: "promoted" };
+      return scheduler === "skip_next"
+        ? { mode: "skipped_next", schedulerId: "nightly" }
+        : { mode: "ran_copy", jobId: "copy-1", schedulerId: "nightly" };
+    }),
     bulkJobAction: vi.fn(async (_queue: string, action: string, jobIds: string[]) => {
       const ok = jobIds.filter((id) => !id.startsWith("ghost"));
       const failed = jobIds.filter((id) => id.startsWith("ghost")).map((jobId) => ({ jobId, reason: "job_not_found" }));
@@ -181,6 +188,39 @@ describe("bulk job actions", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().action).toBe("retry");
     await w.app.close();
+  });
+
+  // Not bulk, but the same harness: the single promote carries the scheduler choice.
+  describe("single promote of a job scheduler's job", () => {
+    const one = (jobId: string) => `/api/connections/c1/queues/payments/jobs/${jobId}/promote`;
+
+    it("runs a copy when no choice is sent, and says so", async () => {
+      const w = await build();
+      const res = await w.app.inject({ method: "POST", url: one("sched-1") });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true, mode: "ran_copy", jobId: "copy-1", schedulerId: "nightly" });
+      expect(w.inspector.promoteJob).toHaveBeenCalledWith("payments", "sched-1", "run_copy");
+      await w.app.close();
+      expect(w.db.__audit[0]!.detail).toMatchObject({ ranCopy: "copy-1", schedulerId: "nightly" });
+    });
+
+    it("passes skip_next through and audits it", async () => {
+      const w = await build();
+      const res = await w.app.inject({ method: "POST", url: one("sched-1"), payload: { scheduler: "skip_next" } });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true, mode: "skipped_next", schedulerId: "nightly" });
+      expect(w.inspector.promoteJob).toHaveBeenCalledWith("payments", "sched-1", "skip_next");
+      await w.app.close();
+      expect(w.db.__audit[0]!.detail).toMatchObject({ skippedNext: true, schedulerId: "nightly" });
+    });
+
+    it("refuses an unknown choice with 400, before touching Redis", async () => {
+      const w = await build();
+      const res = await w.app.inject({ method: "POST", url: one("sched-1"), payload: { scheduler: "both" } });
+      expect(res.statusCode).toBe(400);
+      expect(w.inspector.promoteJob).not.toHaveBeenCalled();
+      await w.app.close();
+    });
   });
 
   describe("audit", () => {

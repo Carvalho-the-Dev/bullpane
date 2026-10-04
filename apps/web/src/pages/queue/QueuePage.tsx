@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowDownUp, BarChart3, Bell, CalendarClock, ChevronDown, Eraser, Flame, Layers, Pause, Play, Plus, RotateCcw, ScrollText, Search, Trash2, Unplug, X } from "lucide-react";
-import { BULK_JOB_LIMIT, JOB_STATES, type BulkJobAction, type BulkJobActionResult, type JobState } from "@bullpane/shared";
+import { BULK_JOB_LIMIT, JOB_STATES, type BulkJobAction, type BulkJobActionResult, type JobState, type JobSummary, type SchedulerPromoteMode } from "@bullpane/shared";
 import { cn } from "@/lib/cn";
 import { routes } from "@/lib/routes";
 import { formatNumber } from "@/lib/format";
@@ -36,6 +36,7 @@ import { HIDE_HINT, HideIcon, useHideQueue } from "@/components/queues/hideQueue
 import { GroupCombobox } from "./GroupCombobox";
 import { PauseQueueDialog } from "@/components/queues/PauseQueueDialog";
 import { jobActionMessage } from "@/lib/jobActionMessage";
+import { PromoteSchedulerJobDialog, type SchedulerJobRef } from "@/components/PromoteSchedulerJobDialog";
 
 type StateTab = JobState | "groups" | "metrics" | "schedulers";
 
@@ -123,6 +124,7 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
   const [pendingBulk, setPendingBulk] = useState<BulkJobAction | null>(null);
   const [confirmBulk, setConfirmBulk] = useState<BulkJobAction | null>(null);
   const [confirmRemoveJob, setConfirmRemoveJob] = useState<string | null>(null);
+  const [promoteScheduled, setPromoteScheduled] = useState<SchedulerJobRef | null>(null);
 
   const [dialog, setDialog] = useState<null | "add" | "clean" | "drain" | "obliterate" | "retryAll" | "pause">(null);
   const [alertOpen, setAlertOpen] = useState(false);
@@ -167,11 +169,14 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
     return items;
   }, [counts, summary.data?.isPro, summary.data?.groupsCount, summary.data?.schedulersCount]);
 
-  const runSingle = (jobId: string, action: JobActionKind) => {
+  const runSingle = (jobId: string, action: JobActionKind, scheduler?: SchedulerPromoteMode) => {
     jobAction.mutate(
-      { jobId, action },
+      { jobId, action, scheduler },
       {
-        onSuccess: (result) => toast.success(jobActionMessage(jobId, action, result)),
+        onSuccess: (result) => {
+          toast.success(jobActionMessage(jobId, action, result));
+          setPromoteScheduled(null);
+        },
         onError: (e) => toast.error(errorMessage(e)),
       },
     );
@@ -180,11 +185,16 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
   /**
    * A single remove goes through a confirmation. It didn't before, and a wrong
    * click on a table that reorders every 3 s deleted the wrong job with no way
-   * back. `retry` and `promote` stay immediate: they are reversible.
+   * back. `retry` and `promote` stay immediate: they are reversible — except promoting
+   * a scheduler's job, which asks how (PromoteSchedulerJobDialog).
    */
-  const onAction = (jobId: string, action: JobActionKind) => {
+  const onAction = (jobId: string, action: JobActionKind, job?: JobSummary) => {
     if (action === "remove") {
       setConfirmRemoveJob(jobId);
+      return;
+    }
+    if (action === "promote" && job?.repeatJobKey) {
+      setPromoteScheduled({ id: job.id, repeatJobKey: job.repeatJobKey, delayedUntil: job.delayedUntil });
       return;
     }
     runSingle(jobId, action);
@@ -613,6 +623,12 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
           if (confirmRemoveJob) runSingle(confirmRemoveJob, "remove");
           setConfirmRemoveJob(null);
         }}
+      />
+      <PromoteSchedulerJobDialog
+        job={promoteScheduled}
+        onClose={() => setPromoteScheduled(null)}
+        onPick={(mode) => promoteScheduled && runSingle(promoteScheduled.id, "promote", mode)}
+        pending={jobAction.isPending && jobAction.variables?.action === "promote" ? (jobAction.variables.scheduler ?? null) : null}
       />
       <PauseQueueDialog
         queue={dialog === "pause" ? queue : null}

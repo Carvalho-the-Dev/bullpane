@@ -614,15 +614,17 @@ describe("writes (official bullmq API)", () => {
     const s = await inspector.getQueueStats(["orders"]);
     expect(s.orders.counts.delayed).toBe(2);
   });
-  it("bullmq's own promote of a scheduler job makes the scheduler skip a run", async () => {
-    // Why promoteJob does not call job.promote() for these: the worker computes the next
-    // iteration from the promoted job's scheduled time, so the day it stood for is lost.
+  it("promoting a scheduler job with skip_next makes the scheduler skip a run", async () => {
+    // bullmq's own promote: the worker computes the next iteration from the promoted
+    // job's scheduled time, so the day it stood for is lost. Why run_copy is the default.
     const daily = q("daily-promote");
     await daily.upsertJobScheduler("start-imports", { pattern: "40 6 * * *" }, { name: "start-imports" });
     const [scheduled] = await daily.getDelayed();
     const scheduledAt = Number(await raw.zscore("bull:daily-promote:repeat", "start-imports"));
 
-    await scheduled.promote();
+    const result = await inspector.promoteJob("daily-promote", scheduled.id!, "skip_next");
+    expect(result).toEqual({ mode: "skipped_next", schedulerId: "start-imports" });
+    expect((await inspector.getJob("daily-promote", scheduled.id!))!.state).toBe("waiting");
     const worker = new Worker("daily-promote", async () => undefined, { connection });
     workers.push(worker);
     await waitFor(async () => Number(await raw.zscore("bull:daily-promote:repeat", "start-imports")) !== scheduledAt);
@@ -640,6 +642,9 @@ describe("writes (official bullmq API)", () => {
     );
     const [scheduled] = await daily.getDelayed();
     const scheduledAt = Number(await raw.zscore("bull:daily-copy:repeat", "start-imports"));
+    // the UI decides whether to ask "copy or skip" from this field of the list row
+    const listed = await inspector.getJobs("daily-copy", "delayed", { start: 0, end: 0, order: "asc" });
+    expect(listed.jobs[0]).toMatchObject({ id: scheduled.id, repeatJobKey: "start-imports" });
 
     const result = await inspector.promoteJob("daily-copy", scheduled.id!);
 
