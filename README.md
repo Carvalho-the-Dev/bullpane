@@ -60,7 +60,7 @@ and held to it by the harness in [docs/STRESS-TEST.md](docs/STRESS-TEST.md).
 ## Quick start
 
 ```sh
-docker run -d -p 3000:3000 -v bullpane-data:/data ghcr.io/madmorett/bullpane
+docker run -d -p 3000:3000 -v bullpane-data:/data bullpane/bullpane
 ```
 
 No database to set up: the dashboard keeps its own data (connections,

@@ -69,7 +69,7 @@
 <pre><span class="c"># 1. run it next to the Redis your workers already use</span>
 docker run -d --name bullpane -p 3000:3000 \
   -v <span class="k">bullpane-data:/data</span> \
-  ghcr.io/madmorett/bullpane:latest
+  bullpane/bullpane
 <span class="c">#    SQLite is built in. MySQL is optional: -e DATABASE_URL=mysql://…</span>
 
 <span class="c"># 2. open http://localhost:3000 and add a Redis connection. No account, no login.</span>

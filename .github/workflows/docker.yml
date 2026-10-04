@@ -26,7 +26,8 @@ permissions:
 # Two pushes in quick succession used to race on the shared build cache
 # ("error writing layer blob: not_found"); one build at a time, newest wins.
 concurrency:
-  group: docker-image-${{ github.ref }}
+  # A manual mirror run must not cancel the build of the push it follows.
+  group: docker-image-${{ github.ref }}-${{ inputs.mirror_tag || 'build' }}
   cancel-in-progress: true
 jobs:
   mirror:

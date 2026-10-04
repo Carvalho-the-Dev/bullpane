@@ -11,6 +11,15 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
+## [Unreleased]
+
+### Added
+
+- **Docker Hub.** The image is now also published as `bullpane/bullpane`
+  (same tags, same multi-platform build as `ghcr.io/madmorett/bullpane`), so the
+  install is `docker run -d -p 3000:3000 -v bullpane-data:/data bullpane/bullpane`.
+  0.5.1 was copied there as `0.5.1`, `0.5` and `latest`.
+
 ## [0.5.1] — 2026-10-04
 
 ### Added

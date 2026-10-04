@@ -48,7 +48,7 @@ Every environment variable of the Docker image works here too.
 Use the Docker image, next to your stack:
 
 ```sh
-docker run -d -p 3000:3000 -v bullpane-data:/data ghcr.io/madmorett/bullpane
+docker run -d -p 3000:3000 -v bullpane-data:/data bullpane/bullpane
 ```
 
 ## Versus bull-board
