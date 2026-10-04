@@ -19,7 +19,7 @@ Open <http://localhost:3000> and add the Redis your BullMQ workers use. No datab
 - BullMQ Pro groups: per-group concurrency, rate limits, paused groups.
 - Safe on a busy production Redis: no `KEYS`, one round trip per read, payloads truncated inside Redis.
 
-Works with BullMQ 4, 5 and 6 on Redis, Redis Cluster and Valkey, and with BullMQ Pro. A bull-board alternative that runs on its own instead of inside your app.
+Works with BullMQ 4, 5 and 6 on Redis, Redis Cluster and Valkey, with BullMQ Pro, and with BullMQ 6 on PostgreSQL (PgBouncer, TLS and read-only roles included). A bull-board alternative that runs on its own instead of inside your app.
 
 **Pro** (USD 39/month, one installation, unlimited users): login with roles, SSO, alerts to Slack or webhooks, folders, flow graph, audit log, and an MCP server for Claude and other AI clients.
 
@@ -38,6 +38,6 @@ All variables: [apps/server/README.md](https://github.com/madmorett/bullpane/blo
 
 ## Tags
 
-`latest`, `0.5.1`, `0.5` for releases, `edge` for every push to main. `linux/amd64` and `linux/arm64`.
+`latest`, `<major>.<minor>` and `<version>` (e.g. `0.6.0`) for releases, `edge` for every push to main. `linux/amd64` and `linux/arm64`.
 
 Also published at `ghcr.io/madmorett/bullpane`, and on npm: `npx bullpane --redis redis://localhost:6379` runs it without Docker.
