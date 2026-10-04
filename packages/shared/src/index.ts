@@ -762,6 +762,12 @@ export interface JobSummary {
   /** BullMQ Pro group id if any */
   groupId: string | null;
   /**
+   * Hash field `rjk`: the job scheduler (or legacy repeatable job) that
+   * produced this job, null for a one-off job. Promoting such a job is not neutral
+   * (see SchedulerPromoteMode), so the UI asks first.
+   */
+  repeatJobKey: string | null;
+  /**
    * Hash field `stc` (read by `Job.fromJSON` as `stalledCounter`): how many
    * times this job was recovered for having stalled — the worker lost the lock
    * and the StalledCheck put the job back into `wait`.
@@ -988,6 +994,30 @@ export type PauseQueueInput = z.infer<typeof pauseQueueSchema>;
 
 /** Cap of ids per bulk call. See the comment above. */
 export const BULK_JOB_LIMIT = 500;
+
+/**
+ * How to promote a delayed job produced by a job scheduler. That job IS the scheduler's
+ * next iteration, and bullmq computes the iteration after it from this job's own
+ * scheduled time — not from now. So the operator picks:
+ *  - `run_copy`: leave the job in place and run a one-off copy now. The next scheduled
+ *    run still happens. The default, because it never loses a run.
+ *  - `skip_next`: bullmq's own promote. The next iteration runs now instead of at its
+ *    time, and nothing runs at that time; the scheduler continues with the one after.
+ * Ignored for a job no scheduler produced.
+ */
+export const SCHEDULER_PROMOTE_MODES = ["run_copy", "skip_next"] as const;
+export type SchedulerPromoteMode = (typeof SCHEDULER_PROMOTE_MODES)[number];
+
+export const promoteJobSchema = z.object({
+  scheduler: z.enum(SCHEDULER_PROMOTE_MODES).default("run_copy"),
+});
+export type PromoteJobInput = z.input<typeof promoteJobSchema>;
+
+/** What promoting a delayed job did (see SchedulerPromoteMode). */
+export type PromoteJobResult =
+  | { mode: "promoted" }
+  | { mode: "ran_copy"; jobId: string; schedulerId: string }
+  | { mode: "skipped_next"; schedulerId: string };
 
 export const BULK_JOB_ACTIONS = ["retry", "remove", "promote"] as const;
 export type BulkJobAction = (typeof BULK_JOB_ACTIONS)[number];
