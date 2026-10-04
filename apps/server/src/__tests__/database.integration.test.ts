@@ -624,11 +624,17 @@ describe.each(targets)("$name: the server on a real database", (target) => {
   });
 
   it("keeps everything after a restart", async () => {
+    // Only what the database holds. `measurement` is the alerts engine's memory
+    // of its last tick (null right after a boot), and `firing`/`lastFiredAt` are
+    // written by that engine whenever a tick happens to run — comparing them
+    // across a restart races the engine. Their persistence is covered above.
+    const alertRules = async () =>
+      (await ok<Array<Record<string, unknown>>>("GET", "/alerts")).map(({ measurement, firing, lastFiredAt, ...rule }) => rule);
     const before = {
       users: await ok<unknown[]>("GET", "/users"),
       connections: (await ok<Array<{ id: string }>>("GET", "/connections")).map((c) => c.id),
       folders: await ok<unknown[]>("GET", "/folders"),
-      alerts: await ok<unknown[]>("GET", "/alerts"),
+      alerts: await alertRules(),
       attention: await ok("GET", "/settings/attention"),
     };
     await shutdown();
@@ -636,7 +642,7 @@ describe.each(targets)("$name: the server on a real database", (target) => {
     expect(await ok<unknown[]>("GET", "/users")).toEqual(before.users);
     expect((await ok<Array<{ id: string }>>("GET", "/connections")).map((c) => c.id)).toEqual(before.connections);
     expect(await ok<unknown[]>("GET", "/folders")).toEqual(before.folders);
-    expect(await ok<unknown[]>("GET", "/alerts")).toEqual(before.alerts);
+    expect(await alertRules()).toEqual(before.alerts);
     expect(await ok("GET", "/settings/attention")).toEqual(before.attention);
   });
 });
