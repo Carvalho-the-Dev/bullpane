@@ -11,7 +11,7 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
-## [Unreleased]
+## [0.5.2] — 2026-10-04
 
 ### Added
 
@@ -21,7 +21,16 @@ written from this file — when you add an entry here, mirror it there
   0.5.1 was copied there as `0.5.1`, `0.5` and `latest`.
 - **`npx bullpane`.** The same dashboard as an npm package, for a look without
   Docker: `npx bullpane --redis redis://localhost:6379`. Listens on 127.0.0.1,
-  keeps its SQLite in `~/.bullpane`. 0.5.1 is published.
+  keeps its SQLite in `~/.bullpane`.
+
+### Fixed
+
+- **A blank page after upgrading.** The UI's `index.html` was served with a
+  one-hour cache, so a browser that had loaded the previous version kept asking
+  for its bundles, which an upgrade removes. It is now always revalidated; the
+  hashed bundles keep their cache.
+- `npx bullpane` no longer prints a deprecation warning for `glob` on first run
+  (`@fastify/static` 8 → 10).
 
 ## [0.5.1] — 2026-10-04
 
