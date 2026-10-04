@@ -46,6 +46,8 @@ Pro: login and roles (admin / operator / viewer, enforced on every API call; use
 - [Website](https://bullpane.com): product, pricing, FAQ
 - [Live demo](https://demo.bullpane.com): the free edition, read-only, against a simulated busy Redis; no login
 - [Changelog](https://bullpane.com/changelog)
+- [BullMQ stalled jobs: what they are and how to find them](https://bullpane.com/guides/bullmq-stalled-jobs)
+- [Promoting a BullMQ job scheduler job skips the next run](https://bullpane.com/guides/bullmq-job-scheduler-promote)
 - [Bullpane vs bull-board](https://bullpane.com/vs/bull-board)
 - [Bullpane vs Taskforce.sh](https://bullpane.com/vs/taskforce)
 - [Bullpane vs QueueDash](https://bullpane.com/vs/queuedash)
