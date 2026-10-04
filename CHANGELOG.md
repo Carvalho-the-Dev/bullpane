@@ -19,6 +19,9 @@ written from this file — when you add an entry here, mirror it there
   (same tags, same multi-platform build as `ghcr.io/madmorett/bullpane`), so the
   install is `docker run -d -p 3000:3000 -v bullpane-data:/data bullpane/bullpane`.
   0.5.1 was copied there as `0.5.1`, `0.5` and `latest`.
+- **`npx bullpane`.** The same dashboard as an npm package, for a look without
+  Docker: `npx bullpane --redis redis://localhost:6379`. Listens on 127.0.0.1,
+  keeps its SQLite in `~/.bullpane`. 0.5.1 is published.
 
 ## [0.5.1] — 2026-10-04
 

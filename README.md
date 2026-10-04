@@ -63,6 +63,9 @@ and held to it by the harness in [docs/STRESS-TEST.md](docs/STRESS-TEST.md).
 docker run -d -p 3000:3000 -v bullpane-data:/data bullpane/bullpane
 ```
 
+No Docker? `npx bullpane --redis redis://localhost:6379` runs the same
+dashboard on your machine (Node 20+, listens on 127.0.0.1, data in `~/.bullpane`).
+
 No database to set up: the dashboard keeps its own data (connections,
 settings, and on Pro users, alerts and the audit log) in a SQLite file in
 `/data`. Keep the volume, or that data dies with the container. Prefer

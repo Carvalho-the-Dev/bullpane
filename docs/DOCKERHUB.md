@@ -40,4 +40,4 @@ All variables: [apps/server/README.md](https://github.com/madmorett/bullpane/blo
 
 `latest`, `0.5.1`, `0.5` for releases, `edge` for every push to main. `linux/amd64` and `linux/arm64`.
 
-Also published at `ghcr.io/madmorett/bullpane`.
+Also published at `ghcr.io/madmorett/bullpane`, and on npm: `npx bullpane --redis redis://localhost:6379` runs it without Docker.

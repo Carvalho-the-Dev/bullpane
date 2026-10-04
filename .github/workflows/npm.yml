@@ -1,7 +1,10 @@
 # Publishes `bullpane` to npm (npx bullpane) for every release tag, from the
-# same commit the Docker images are built from. Needs the repository secret
-# NPM_TOKEN (an npm automation token with publish rights on `bullpane`);
-# without it the job skips instead of failing the release.
+# same commit the Docker images are built from.
+#
+# Auth is npm Trusted Publishing (OIDC): no token, no 2FA prompt. Configure it
+# once on npmjs.com → bullpane → Settings → Trusted Publisher → GitHub Actions,
+# repository madmorett/bullpane, workflow `npm.yml`. A repository secret
+# NPM_TOKEN, if present, is used instead.
 name: npm package
 on:
   push:
@@ -24,6 +27,8 @@ jobs:
           node-version: 22
           cache: pnpm
           registry-url: https://registry.npmjs.org
+      # Trusted Publishing needs npm >= 11.5.1; Node 22 ships npm 10.
+      - run: npm install -g npm@latest
       - run: pnpm install --frozen-lockfile
       - run: node packages/npm/build.mjs
       - run: node packages/npm/smoke.mjs
@@ -36,6 +41,9 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then echo "NPM_TOKEN is not set; skipping publish"; exit 0; fi
           cd packages/npm/out
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "bullpane@${VERSION}" version >/dev/null 2>&1; then echo "bullpane@${VERSION} is already on npm"; exit 0; fi
+          # Without NPM_TOKEN, npm authenticates through the workflow's OIDC token.
+          if [ -z "$NODE_AUTH_TOKEN" ]; then unset NODE_AUTH_TOKEN; fi
           npm publish --access public --provenance
