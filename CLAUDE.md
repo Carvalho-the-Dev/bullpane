@@ -25,6 +25,9 @@ contract lives in `packages/shared/src/index.ts`; the Redis contract in
 - Pro features are gated in exactly two places: `requireFeature()` on the server
   (HTTP 402 `pro_required`) and `useEdition()` on the web. Never hide a Pro feature;
   show it locked with the upsell.
+- Code that implements a Pro feature lives in `apps/server/src/ee/` or `apps/web/src/ee/`
+  (Bullpane Commercial License); everything else is MIT. New Pro code goes in `ee/`
+  from the first commit. See "Where Pro code lives" in `docs/ARCHITECTURE.md`.
 - DTOs and zod schemas live in `@bullpane/shared`. Do not redefine them.
 - Never log job data or Redis URLs with passwords.
 - Must keep working with BullMQ Pro (groups/batches). Pro key names live in

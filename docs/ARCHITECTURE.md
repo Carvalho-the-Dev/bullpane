@@ -8,7 +8,9 @@ Pro subscription (USD 39/month or 390/year, one installation) that unlocks team 
 bullpane/
 ├── apps/
 │   ├── server/          Fastify API + serves the built web UI. Owns MySQL, auth, alerts, licensing.
+│   │   └── src/ee/      Pro features (alerts, audit, folders, flows, SSO, user admin). Commercial license.
 │   ├── web/             React + Vite dashboard.
+│   │   └── src/ee/      Pro pages. Commercial license.
 │   └── simulator/       Generates realistic BullMQ (and fake Pro group) traffic for the live demo.
 ├── packages/
 │   ├── shared/          Types + zod schemas shared by everything. THE contract.
@@ -270,6 +272,27 @@ Gating is one function on the server (`requireFeature(feature)`) returning HTTP 
 `{ error: "pro_required", feature }`, and one hook on the web (`useEdition()`), so the UI
 shows the locked feature with a lock icon and an upsell instead of hiding it.
 
+### Where Pro code lives: `ee/`
+
+The code that implements a Pro feature lives in `apps/server/src/ee/` or
+`apps/web/src/ee/`, under the Bullpane Commercial License (`ee/LICENSE`). Everything
+else is MIT. The license, not the code layout, is what protects Pro: the source is
+public and anyone can delete a gate, but running a build without one in production
+breaks the license, and that is what a paying customer's compliance cares about.
+
+The boundary is by feature, not by layer:
+
+* **In `ee/`:** the alerts engine and its services, audit (service + the `onResponse`
+  hook), folders, flows, SSO (OIDC, SAML, provider admin, login flow), user admin
+  routes, the pages that render those features, and their tests.
+* **Outside `ee/`:** the gates themselves (`plugins/gates.ts`, `useEdition()`), license
+  verification, the edition service, sessions and password login, the DB schema and
+  migrations, the shared DTOs in `@bullpane/shared`, and the locked-state UI
+  (`LockedFeature`, upsell). Core may import from `ee/` to wire it up; `ee/` may import
+  anything from core.
+
+A new Pro feature goes in `ee/` from its first commit.
+
 ### The free edition has no login
 
 There is no account, no first-run wizard and no login page until a license unlocks
@@ -360,7 +383,7 @@ verifies a signature with a public cert.
 
 **Two places the SSO login flow bends an existing rule, both on purpose.** The OIDC
 callback is a `GET` that authenticates somebody, so it is the single exception to
-"reads are never audited" (`AUDITED_READS` in `plugins/audit.ts`) — otherwise the trail
+"reads are never audited" (`AUDITED_READS` in `ee/plugins/audit.ts`) — otherwise the trail
 would record password logins but not SSO ones, and its contents would depend on which
 protocol the customer chose. And the SAML callback is a `POST`, so read-only mode
 allows that one path (`isLoginWrite`): read-only is about not touching the customer's
@@ -436,7 +459,7 @@ nobody queries it. `audit_log` is the same information, persisted, filterable, e
 
 ### Instrumentation: one hook, enriched by handlers
 
-`plugins/audit.ts` registers a single `onResponse` hook for the whole `/api` tree, next to
+`ee/plugins/audit.ts` registers a single `onResponse` hook for the whole `/api` tree, next to
 `blockWrites` in `routes/index.ts` and for the same reason. The failure mode of a call per
 handler is silent: a route added in six months without its `audit.record(...)` line leaves
 a hole nobody notices until an auditor asks. A hook cannot be forgotten — an unmapped

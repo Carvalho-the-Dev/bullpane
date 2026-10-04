@@ -13,6 +13,16 @@ written from this file — when you add an entry here, mirror it there
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-04
+
+### Changed
+
+- **Licensing is now open core.** The code of the Pro features moved to
+  `apps/server/src/ee/` and `apps/web/src/ee/` and is licensed under the
+  Bullpane Commercial License: readable and modifiable, free for development and
+  testing, a Pro subscription for production. Everything else stays MIT.
+  Releases up to 0.3.0 remain MIT in full. No behaviour changed.
+
 ### Added
 
 - **`BULLPANE_CONNECTIONS`**: a JSON array of Redis connections created at boot

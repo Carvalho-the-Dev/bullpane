@@ -1,9 +1,25 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta property="og:title" content="Changelog — Bullpane"><meta property="og:type" content="website"><meta property="og:url" content="https://bullpane.com/changelog"><meta property="og:image" content="https://bullpane.com/shots/overview.jpg"><meta name="twitter:card" content="summary_large_image"><meta property="og:description" content="Every release of Bullpane, the self-hosted dashboard for BullMQ and BullMQ Pro: what was added, what changed and what was fixed."><link rel="canonical" href="https://bullpane.com/changelog"><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%277%27 fill=%27%230b0d12%27/%3E%3Cpath d=%27M8 8h9a5 5 0 0 1 0 10H8zM8 18h10a5 5 0 0 1 0 10H8z%27 fill=%27%23f5a524%27/%3E%3C/svg%3E"><link rel="stylesheet" href="/styles.css"><title>Changelog — Bullpane</title><meta name="description" content="Every release of Bullpane, the self-hosted dashboard for BullMQ and BullMQ Pro: what was added, what changed and what was fixed."></head><body>
 <nav class="nav"><div class="wrap"><a class="logo" href="/"><svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#171b24"/><path d="M8 8h9a5 5 0 0 1 0 10H8zM8 18h10a5 5 0 0 1 0 10H8z" fill="#f5a524"/></svg>Bullpane</a><div class="nav-links"><a href="/">Home</a><a href="/#pricing">Pricing</a><a href="/changelog">Changelog</a></div></div></nav><main class="legal"><div class="wrap">
 <h1>Changelog</h1>
-<p class="updated">Last updated 13 September 2026</p>
+<p class="updated">Last updated 4 October 2026</p>
 
-<p class="lead-sm">Every version of Bullpane and what it changed for you. Docker images are published per version: <code>ghcr.io/madmorett/bullpane:0.3.0</code>, <code>:0.3</code>, <code>:latest</code>.</p>
+<p class="lead-sm">Every version of Bullpane and what it changed for you. Docker images are published per version: <code>ghcr.io/madmorett/bullpane:0.4.0</code>, <code>:0.4</code>, <code>:latest</code>.</p>
+
+<article class="release">
+  <div class="release-head">
+    <h2 id="v0-4-0">0.4.0</h2>
+    <span class="release-date">4 October 2026</span>
+  </div>
+  <p class="release-note">Bullpane is now open core. Nothing changes in the product: the free edition is still MIT and still needs no login, and Pro works exactly as before.</p>
+  <h3>Changed</h3>
+  <ul>
+    <li><strong>Licensing.</strong> The code of the Pro features lives in the repository&rsquo;s <code>ee/</code> directories under the Bullpane Commercial License: you can read it, modify it and run it for development and testing, and production use needs a Pro subscription. Everything else stays MIT. Releases up to 0.3.0 remain MIT in full.</li>
+  </ul>
+  <h3>Added</h3>
+  <ul>
+    <li><strong><code>BULLPANE_CONNECTIONS</code></strong>: a JSON array of Redis connections created at boot when no connection of that name exists. It never overwrites a connection edited in the UI, works in read-only mode, and a bad entry stops the boot naming the field without printing the URL.</li>
+  </ul>
+</article>
 
 <article class="release">
   <div class="release-head">

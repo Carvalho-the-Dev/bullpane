@@ -218,7 +218,7 @@ admin wanted you to believe". Rows leave only by age, through the retention job.
 is `admin` and not `operator`, because the log shows admin-only actions (connections,
 users, license) and reading who changed access is a different right from pausing a queue.
 
-**Instrumentation is one global `onResponse` hook** (`plugins/audit.ts`), registered in
+**Instrumentation is one global `onResponse` hook** (`ee/plugins/audit.ts`), registered in
 `routes/index.ts` next to `blockWrites` and for the same reason: a single choke point
 beats remembering to instrument each handler. A per-handler call that someone forgets
 leaves a hole nobody notices until an auditor asks; a route missing from the map logs a
@@ -257,7 +257,7 @@ deleted people stay filterable.
 state/grace/limit and how many were removed, the job NAME added and its payload size in
 bytes, which fields of a user changed, the licensee) — never `job.data`, which routinely
 holds customer PII and would end up in a CSV export. `sanitizeDetail` in
-`services/audit.ts` strips `data`, `payload`, `body`, `returnvalue`, `password`, `url`,
+`ee/services/audit.ts` strips `data`, `payload`, `body`, `returnvalue`, `password`, `url`,
 `token`, `secret` and `key` at any depth, so the rule is enforced in one place instead of
 depending on every future handler remembering it. There is a test for exactly this.
 

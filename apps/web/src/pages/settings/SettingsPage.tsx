@@ -6,7 +6,7 @@ import { AttentionTab } from "./AttentionTab";
 import { ConnectionsTab } from "./ConnectionsTab";
 import { LicenseTab } from "./LicenseTab";
 import { AboutTab } from "./AboutTab";
-import { SsoTab } from "./SsoTab";
+import { SsoTab } from "@/ee/pages/settings/SsoTab";
 
 const TABS = ["connections", "attention", "sso", "license", "about"] as const;
 type Tab = (typeof TABS)[number];

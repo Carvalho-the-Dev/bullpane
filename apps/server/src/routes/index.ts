@@ -4,15 +4,15 @@
  */
 import type { FastifyInstance } from "fastify";
 import { authPlugin } from "../auth/plugin";
-import { registerAuditHook } from "../plugins/audit";
+import { registerAuditHook } from "../ee/plugins/audit";
 import { blockWrites } from "../plugins/gates";
-import { alertRoutes } from "./alerts";
-import { auditRoutes } from "./audit";
+import { alertRoutes } from "../ee/routes/alerts";
+import { auditRoutes } from "../ee/routes/audit";
 import { authRoutes } from "./auth";
-import { authSsoRoutes } from "./auth-sso";
+import { authSsoRoutes } from "../ee/routes/auth-sso";
 import { connectionRoutes } from "./connections";
-import { flowRoutes } from "./flows";
-import { folderRoutes } from "./folders";
+import { flowRoutes } from "../ee/routes/flows";
+import { folderRoutes } from "../ee/routes/folders";
 import { groupRoutes } from "./groups";
 import { healthRoutes } from "./health";
 import { jobRoutes } from "./jobs";
@@ -20,8 +20,8 @@ import { licenseRoutes } from "./license";
 import { queueRoutes } from "./queues";
 import { settingsRoutes } from "./settings";
 import { setupRoutes } from "./setup";
-import { ssoRoutes } from "./sso";
-import { userRoutes } from "./users";
+import { ssoRoutes } from "../ee/routes/sso";
+import { userRoutes } from "../ee/routes/users";
 
 export async function apiPlugin(app: FastifyInstance): Promise<void> {
   await app.register(authPlugin);
@@ -32,7 +32,7 @@ export async function apiPlugin(app: FastifyInstance): Promise<void> {
 
   // Audit is the mirror image of blockWrites: one hook for the whole /api tree,
   // so a route added later cannot fall out of the trail by being forgotten.
-  // See plugins/audit.ts for why this is a hook and not a call per handler.
+  // See ee/plugins/audit.ts for why this is a hook and not a call per handler.
   registerAuditHook(app);
 
   app.setNotFoundHandler(async (request, reply) => {

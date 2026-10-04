@@ -218,11 +218,13 @@ same production that Bullpane watches:
 
 ## License
 
-MIT for the whole codebase — see [LICENSE](LICENSE). The Pro features are in
-this repository under the same license; what you pay for is the key that unlocks
-them in the shipped build, and the maintenance of the project. That gating is
-the business model, and it is the honest reason this exists as open source at
-all.
+Open core — see [LICENSE](LICENSE). Everything outside an `ee/` directory is
+MIT: the free edition, the Redis inspector, the shared contract. The code of the
+Pro features lives in `apps/server/src/ee/` and `apps/web/src/ee/` under the
+[Bullpane Commercial License](apps/server/src/ee/LICENSE): you can read it,
+modify it and run it for development and testing, but running it in production
+needs a Pro subscription, and builds with the license check removed are not
+allowed. Releases up to 0.3.0 were MIT in full and stay that way.
 
 Security issues: please see [SECURITY.md](SECURITY.md) rather than opening a
 public issue.

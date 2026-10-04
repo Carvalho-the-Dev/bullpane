@@ -17,7 +17,7 @@
     {
       "@type": "FAQPage",
       "mainEntity": [
-        { "@type": "Question", "name": "Is Bullpane a bull-board alternative?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Both are self-hosted, MIT-licensed dashboards for BullMQ. bull-board is a viewer you embed in your own server or run with its CLI or Docker image. Bullpane is a standalone dashboard that adds search inside job data, a BullMQ Pro groups view and reads bounded for production Redis; its Pro edition adds users and roles, SSO, alerts and an audit log." } },
+        { "@type": "Question", "name": "Is Bullpane a bull-board alternative?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Both are self-hosted dashboards for BullMQ with public source: bull-board is MIT, Bullpane is MIT with its Pro features source-available. bull-board is a viewer you embed in your own server or run with its CLI or Docker image. Bullpane is a standalone dashboard that adds search inside job data, a BullMQ Pro groups view and reads bounded for production Redis; its Pro edition adds users and roles, SSO, alerts and an audit log." } },
         { "@type": "Question", "name": "Does bull-board have authentication?", "acceptedAnswer": { "@type": "Answer", "text": "The embedded bull-board has no built-in authentication; you protect it with your own app's middleware. Its CLI and Docker image support one shared basic-auth user. Neither has user accounts or roles. Bullpane's free edition has no login at all; Bullpane Pro has user accounts, admin/operator/viewer roles and SSO over OIDC and SAML." } },
         { "@type": "Question", "name": "Can bull-board search inside job data?", "acceptedAnswer": { "@type": "Answer", "text": "No. bull-board's search matches queue names; searching job payloads has been an open request since 2020 (issue #154). Bullpane searches inside job data in the free edition, bounded and resumable so it never blocks Redis." } },
         { "@type": "Question", "name": "When should I pick bull-board over Bullpane?", "acceptedAnswer": { "@type": "Answer", "text": "Pick bull-board when you want the dashboard mounted inside your existing Express, Fastify, NestJS or Hono app behind the auth you already have, when you still run Bull 3/4, or when you run BullMQ 6 on its PostgreSQL backend, which Bullpane does not support yet." } }
@@ -43,7 +43,7 @@
 <table>
 <thead><tr><th></th><th class="hl"><b>Bullpane</b><small>standalone container</small></th><th><b>bull-board</b><small>embedded, CLI or Docker</small></th></tr></thead>
 <tbody>
-<tr><td>License</td><td class="hl">MIT</td><td>MIT</td></tr>
+<tr><td>License</td><td class="hl">MIT core, Pro source-available</td><td>MIT</td></tr>
 <tr><td>Runs inside your own Express / Fastify / Nest / Hono app</td><td class="hl"><i class="pill no">–</i><small>separate container</small></td><td><i class="pill yes">✓</i></td></tr>
 <tr><td>Standalone Docker image</td><td class="hl"><i class="pill yes">✓</i></td><td><i class="pill yes">✓</i></td></tr>
 <tr><td>Bull 3/4 (not MQ)</td><td class="hl"><i class="pill no">–</i></td><td><i class="pill yes">✓</i></td></tr>

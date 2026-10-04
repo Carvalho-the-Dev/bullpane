@@ -136,7 +136,7 @@ pointing the dashboard at a production Redis for the first time. See
 
 ## How alerts evaluate
 
-`src/alerts/engine.ts` ticks every `BULLPANE_ALERTS_INTERVAL` seconds, only while the edition has the
+`src/ee/alerts/engine.ts` ticks every `BULLPANE_ALERTS_INTERVAL` seconds, only while the edition has the
 `alerts` feature. An alert is scoped to one **queue** or to a **folder** (every queue in the
 folder, across connections; fires when any breaches, the worst queue is reported). Per tick, per
 connection, it does **one** `discoverQueues + getQueueStats` call, shared by every alert that
@@ -151,14 +151,14 @@ touches that connection. Per queue:
 `queueName: null` means "every discovered queue of the connection": each queue is measured and
 the alert fires if **any** breaches; the worst queue is the one reported.
 
-The state machine is the pure function `evaluateAlert(alert, sample, now)` in `src/alerts/evaluate.ts`:
+The state machine is the pure function `evaluateAlert(alert, sample, now)` in `src/ee/alerts/evaluate.ts`:
 
 * not firing + breached → **fire**: notify every channel, insert a `fired` event, set `firing`, `lastFiredAt = now`
 * firing + breached → **renotify** only once `cooldownMinutes` have elapsed since `lastFiredAt`
 * firing + healthy → **resolve**: notify, insert a `resolved` event, clear `firing`
 * inconclusive sample (below `minSample`, or Redis unreachable for a queue alert) → nothing changes
 
-Delivery (`src/alerts/deliver.ts`): Slack incoming webhooks get a Block Kit message (queue, value,
+Delivery (`src/ee/alerts/deliver.ts`): Slack incoming webhooks get a Block Kit message (queue, value,
 threshold, deep link); generic webhooks get
 `POST { alert, event, connection, queue, value, threshold, status, message, url }` plus the custom
 headers. 5 s timeout per channel via `AbortSignal.timeout`; a failed delivery is recorded as a

@@ -44,6 +44,10 @@ Imperative, present tense, under 72 chars. Reference the issue when there is one
 
 ## License
 
-By contributing you agree your work is released under the MIT license in
-`LICENSE`. The Pro edition is the same code with a license key; contributions
-to Pro-gated features are welcome and stay MIT.
+Code outside an `ee/` directory is MIT, and by contributing to it you agree
+your work is released under the MIT license in `LICENSE`.
+
+Code inside `apps/server/src/ee/` and `apps/web/src/ee/` is the Pro edition,
+under the Bullpane Commercial License. Contributions there are welcome; by
+sending one you license it to the maintainer under the MIT license, so it can
+ship as part of the Pro edition under the commercial license.
