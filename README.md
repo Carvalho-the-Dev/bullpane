@@ -18,9 +18,10 @@ progress, logs, flows and Pro groups in a UI that is pleasant to look at.
 The free edition asks for nothing: no account, no login, no first-run wizard.
 Start the container, open it, use it.
 
-Works with BullMQ 4, 5 and 6 on Redis, Redis Cluster and Valkey, and with
-BullMQ Pro. The BullMQ 6 PostgreSQL backend is not supported yet; if you run
-it, [say so](mailto:hello@bullpane.com) and it moves up the list.
+Works with BullMQ 4, 5 and 6 on Redis, Redis Cluster and Valkey, with BullMQ
+Pro, and with BullMQ 6 on PostgreSQL (behind PgBouncer, over TLS, or with a
+read-only role): `npx bullpane --postgres postgres://user:pass@host:5432/db`.
+See [docs/POSTGRES.md](docs/POSTGRES.md).
 
 It exists because the alternatives make you choose. bull-board is a viewer:
 no search inside job data, no roles, no alerts. Taskforce.sh is hosted, so your
