@@ -15,6 +15,8 @@ import type {
   AttentionThresholds,
   BulkJobAction,
   BulkJobActionResult,
+  PromoteJobResult,
+  SchedulerPromoteMode,
   AuditAction,
   AuditPage,
   ConnectionHealth,
@@ -105,6 +107,10 @@ export interface AlertTestResult {
 }
 
 export type JobActionKind = "retry" | "promote" | "remove" | "discard";
+/** `promote` also says what happened to a scheduler's job (see PromoteJobResult). */
+export type JobActionResponse = { ok: boolean } & Partial<Record<"jobId" | "schedulerId", string>> & {
+  mode?: PromoteJobResult["mode"];
+};
 export type QueueActionKind =
   | "pause"
   | "resume"
@@ -434,10 +440,19 @@ export function useJobLogs(
 export function useJobAction(cid: string, queue: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ jobId, action }: { jobId: string; action: JobActionKind }) => {
+    mutationFn: ({
+      jobId,
+      action,
+      scheduler,
+    }: {
+      jobId: string;
+      action: JobActionKind;
+      /** promote only, for a job a scheduler produced (see SchedulerPromoteMode) */
+      scheduler?: SchedulerPromoteMode;
+    }): Promise<JobActionResponse> => {
       const base = `${queuePath(cid, queue)}/jobs/${seg(jobId)}`;
-      if (action === "remove") return api.del<{ ok: boolean }>(base);
-      return api.post<{ ok: boolean }>(`${base}/${action}`);
+      if (action === "remove") return api.del<JobActionResponse>(base);
+      return api.post<JobActionResponse>(`${base}/${action}`, action === "promote" && scheduler ? { scheduler } : undefined);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.queue(cid, queue) });
