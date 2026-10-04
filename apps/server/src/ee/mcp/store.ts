@@ -1,7 +1,7 @@
 /**
  * Persistence for the MCP OAuth server, behind an interface so the whole flow
  * (register → authorize → token → /mcp) can be tested through `app.inject`
- * without MySQL. Schema and rationale: migrations/0009_mcp.sql.
+ * without MySQL. Schema and rationale: migrations/mysql/0009_mcp.sql.
  *
  * The two single-use operations — consuming a code and rotating a refresh token —
  * are conditional writes whose affected-row count decides who won. Two replicas
@@ -52,10 +52,19 @@ export interface McpStore {
   listGrants(userId: string | null): Promise<McpGrantWithUser[]>;
 }
 
-function affectedRows(result: unknown): number {
+/**
+ * Rows changed by a write, on either database. Getting this wrong is not a
+ * cosmetic bug: 0 here means "someone else won", so every code exchange and
+ * every refresh would be refused.
+ */
+export function affectedRows(result: unknown): number {
   // drizzle's mysql2 driver resolves writes to [ResultSetHeader, fields]
   const header = Array.isArray(result) ? result[0] : result;
-  return typeof header === "object" && header !== null && "affectedRows" in header ? Number(header.affectedRows) : 0;
+  if (typeof header !== "object" || header === null) return 0;
+  if ("affectedRows" in header) return Number(header.affectedRows);
+  // drizzle's libsql driver (SQLite) resolves writes to a ResultSet
+  if ("rowsAffected" in header) return Number(header.rowsAffected);
+  return 0;
 }
 
 export class DrizzleMcpStore implements McpStore {

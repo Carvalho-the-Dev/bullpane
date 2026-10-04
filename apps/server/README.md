@@ -1,7 +1,8 @@
 # @bullpane/server
 
-Fastify 5 API that owns MySQL (users, sessions, connections, folders, alerts, flow edges,
-settings), auth, licensing and the alert engine, and serves the built web UI. All reads of a
+Fastify 5 API that owns the dashboard's database — SQLite by default, MySQL when
+`DATABASE_URL=mysql://…` (users, sessions, connections, folders, alerts, flow edges,
+settings) — auth, licensing and the alert engine, and serves the built web UI. All reads of a
 customer's Redis go through `@bullpane/redis-inspector`; this package never opens an
 ioredis connection itself.
 
@@ -13,12 +14,12 @@ The route contract is `docs/API.md`; the DTOs and zod schemas come from
 ```bash
 # from the repo root
 cp .env.example .env            # SESSION_SECRET is only needed once you unlock Pro
-docker compose up mysql -d      # or any MySQL 8 reachable at DATABASE_URL
 pnpm --filter @bullpane/server dev   # tsx watch, reads ../../.env
 ```
 
-First boot waits for MySQL (retries for 60 s, one log line every 2 s), applies
-`migrations/*.sql`, then listens on `http://localhost:3000`. Open the web UI (or
+With `DATABASE_URL` unset the database is `apps/server/data/bullpane.db`, created on
+first boot. With a MySQL URL, first boot waits for MySQL (retries for 60 s, one log line
+every 2 s). Either way it applies `migrations/<dialect>/*.sql`, then listens on `http://localhost:3000`. Open the web UI (or
 `POST /api/setup`) to create the first admin.
 
 Playground: `DEMO_MODE=true` skips setup — it seeds the admin from
@@ -39,7 +40,7 @@ inspector reads its Lua scripts from disk at runtime, so the pragmatic productio
 | `pnpm start` | `tsx src/index.ts` (what the Dockerfile runs) |
 | `pnpm build` | `tsc --noEmit` — a typecheck; nothing is emitted |
 | `pnpm typecheck` | same |
-| `pnpm test` | vitest unit tests (no MySQL / Redis needed) |
+| `pnpm test` | vitest; the real-database suite runs on SQLite, and on MySQL too when `BULLPANE_TEST_MYSQL_URL` is set (see CONTRIBUTING.md). No Redis needed |
 | `pnpm license:dev` | print a dev Pro license (see below) |
 
 `tsconfig.build.json` is kept for anyone who wants a compiled `dist/` (`tsc -p tsconfig.build.json`),
@@ -55,7 +56,8 @@ Every variable in `/.env.example` is read in `src/config.ts`; nothing else touch
 | `HOST` | `0.0.0.0` | |
 | `SESSION_SECRET` | random per process | Signs the `bullpane_session` cookie. Optional: the free edition has no login, so a first run must not be blocked by it. **Set a fixed 32+ character secret before unlocking Pro** — otherwise every restart logs everyone out. |
 | `PUBLIC_URL` | `http://localhost:3000` | Used in Slack/webhook links (`/c/:connectionId/q/:queue`). `https://` makes the cookie `Secure`. |
-| `DATABASE_URL` | `mysql://bullpane:bullpane@localhost:3306/bullpane` | |
+| `DATABASE_URL` | unset → SQLite | `mysql://…` for MySQL (required for more than one replica), `file:/path/x.db` for a specific SQLite file. Anything else refuses to boot. |
+| `BULLPANE_DATA_DIR` | `apps/server/data` (`/data` in the image) | Where `bullpane.db` lives when `DATABASE_URL` is unset. Keep it on a local disk or volume, never NFS/EFS. |
 | `BULLPANE_LICENSE_KEY` | empty | Pro license. A key saved via `PUT /api/license` (settings table) wins over the env var. |
 | `BULLPANE_CHECKOUT_URL` | `https://bullpane.com/#pricing` | Target of the "Unlock Pro" button. Pricing is a section on the home page, not a route. |
 | `DEMO_MODE` | `false` | See above. |
@@ -177,9 +179,9 @@ single `getQueueStats`), detected edges from `sampleFlowEdges` per queue (5 in p
 src/
   config.ts            env → Config
   app.ts               buildApp(): fastify + services on app.ctx + static/SPA
-  index.ts             boot: wait for MySQL, migrate, seed demo, listen, alerts engine, shutdown
+  index.ts             boot: open the database, migrate, seed demo, listen, alerts engine, shutdown
   context.ts           AppContext + fastify type augmentation
-  db/                  drizzle schema, mysql2 pool, sql migrator
+  db/                  drizzle schemas (mysql + sqlite, dialect chosen at boot), connection, sql migrator
   auth/                bcrypt, sessions, guards, session cookie plugin
   license.ts           Ed25519 verify/sign
   plugins/             errors (ApiError mapping), gates (pro feature / demo lock)
@@ -187,7 +189,8 @@ src/
   alerts/              evaluate (pure), deliver (slack/webhook), engine (interval loop)
   routes/              one file per resource, registered under /api
   demo/seed.ts         DEMO_MODE content
-  __tests__/           vitest, no infrastructure needed
-migrations/0001_init.sql
+  __tests__/           vitest; database.integration.test.ts runs the app on a real database
+migrations/mysql/      what existing MySQL installs have run, 0001 → 0008
+migrations/sqlite/     the same schema for SQLite, starting at the current one
 scripts/print-dev-license.ts
 ```

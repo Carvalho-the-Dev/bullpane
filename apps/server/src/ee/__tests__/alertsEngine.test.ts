@@ -91,6 +91,7 @@ function fakeWorld() {
   const delivered: Array<{ status: string }> = [];
   let rows: AlertRow[] = [];
   let folderQueues: Array<{ connectionId: string; queueName: string }> = [];
+  let connectionListError: Error | null = null;
 
   const alerts = {
     listRows: vi.fn(async () => rows),
@@ -115,7 +116,10 @@ function fakeWorld() {
         if (!c) throw new Error("not found");
         return c;
       }),
-      listRows: vi.fn(async () => CONNECTIONS),
+      listRows: vi.fn(async () => {
+        if (connectionListError) throw connectionListError;
+        return CONNECTIONS;
+      }),
       hiddenQueueNames: vi.fn(async (id: string) => hidden.get(id) ?? new Set<string>()),
       inspectorFor: (row: { id: string }) => inspectors.get(row.id) as never,
     } as never,
@@ -163,6 +167,10 @@ function fakeWorld() {
     },
     failConnection(id: string | null) {
       failingConnection = id;
+    },
+    /** the database read of all connections fails (database restarting) */
+    failConnectionList(err: Error | null) {
+      connectionListError = err;
     },
     setRules(...r: AlertRow[]) {
       rows = r;
@@ -338,6 +346,23 @@ describe("wide scopes", () => {
     // the rule fires once, on its worst queue
     expect(w.events.filter((e) => e.status === "fired")).toHaveLength(1);
     expect(w.events.find((e) => e.status === "fired")?.queueName).toBe("payments");
+  });
+
+  it("a failed connection list is a failed tick, not an unhandled rejection that kills the process", async () => {
+    vi.useRealTimers();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const w = fakeWorld();
+      w.setRules(w.rule("g", { type: "global" }, rate(10, 15)));
+      w.failConnectionList(new Error("Pool is closed."));
+      await w.engine.tick();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 
   it("a connection rule stays on its connection", async () => {

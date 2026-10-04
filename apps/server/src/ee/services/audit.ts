@@ -155,7 +155,7 @@ export class AuditService {
         createdAt: input.createdAt ?? new Date(),
         actorId: input.actor?.id ?? null,
         // Denormalised on purpose: the row must still name the person after the
-        // user is deleted. See migrations/0004_audit_log.sql.
+        // user is deleted. See migrations/mysql/0004_audit_log.sql.
         actorEmail: truncate(input.actor?.email ?? null, 255),
         actorName: truncate(input.actor?.name ?? null, 80),
         actorRole: input.actor?.role ?? null,

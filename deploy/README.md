@@ -10,8 +10,12 @@ Ways to run Bullpane in production. Pick one.
 
 In every case the dashboard needs:
 
-1. **MySQL** for its own data (users, connections, folders, alerts). That is
-   hundreds of KB, not gigabytes: a container or the smallest instance is fine.
+1. **Somewhere to keep its own data** (users, connections, folders, alerts).
+   By default that is a SQLite file in `/data` — mount a volume there and you
+   are done. Set `DATABASE_URL=mysql://…` instead when you run **more than one
+   replica** (Kubernetes, ECS with desired count > 1), on **ECS Fargate**
+   at all (its disk is gone on every deploy), or want a managed database; MySQL 8 or MariaDB, and the smallest instance is plenty — this is
+   hundreds of KB, not gigabytes. Never put the SQLite file on NFS/EFS.
 2. **A network route to your Redis.** This is the step that stalls most deploys.
 3. **`SESSION_SECRET`**, 32+ random characters. Changing it signs everyone out.
 
@@ -20,9 +24,9 @@ Optionally, `BULLPANE_LICENSE_KEY` to unlock the Pro edition.
 ## Updating an existing box
 
 The dashboard keeps nothing in the container: users, connections, folders,
-alerts and the audit log live in MySQL, and the licence key with them. Updating
-is therefore pulling a new image and recreating the app container — MySQL is
-left alone.
+alerts and the audit log live in the database (the `/data` volume for SQLite,
+or MySQL), and the licence key with them. Updating is therefore pulling a new
+image and recreating the app container — the volume or MySQL is left alone.
 
 ```sh
 cd /opt/bullpane                      # wherever your compose file lives
@@ -42,6 +46,16 @@ means restoring the MySQL dump you took first:
 ```sh
 docker compose --env-file .env exec mysql \
   mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" bullpane > backup-$(date +%F).sql
+```
+
+On SQLite, stop the app and copy the volume (a copy taken while it runs can
+miss the last writes, which sit in `bullpane.db-wal` until a checkpoint):
+
+```sh
+docker compose stop app
+docker run --rm -v <project>_bullpane-data:/data -v "$PWD":/backup alpine \
+  tar czf /backup/bullpane-data-$(date +%F).tgz -C /data .
+docker compose start app
 ```
 
 ### Coming from `bullmq-visualizer`

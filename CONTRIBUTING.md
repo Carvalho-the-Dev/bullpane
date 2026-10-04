@@ -7,13 +7,27 @@ contract, do not break the demo.
 
 ```sh
 pnpm install
-docker compose up mysql -d          # local MySQL on 3306 (bullpane/bullpane)
 cp .env.example .env
-pnpm dev                            # server :3000 + web (Vite) with proxy
+pnpm dev                            # server :3000 + web (Vite) with proxy; SQLite, no database to start
 pnpm dev:simulator                  # optional: fills your local Redis with traffic
 ```
 
 `pnpm typecheck` and `pnpm test` must pass before you open a PR.
+
+**Touching the schema?** It exists twice: `src/db/schema.mysql.ts` +
+`migrations/mysql/` and `src/db/schema.sqlite.ts` + `migrations/sqlite/`. Change
+both in the same PR (the typecheck fails if the row types drift), then run the
+real-database suite against MySQL too:
+
+```sh
+docker run -d --rm --name bp-mysql -e MYSQL_ROOT_PASSWORD=root -p 33061:3306 mysql:8.4
+BULLPANE_TEST_MYSQL_URL=mysql://root:root@127.0.0.1:33061 \
+  pnpm --filter @bullpane/server exec vitest run src/__tests__/database.integration.test.ts
+```
+
+Without that variable the suite runs on SQLite only. To develop against MySQL:
+`docker compose --profile mysql up -d mysql` and
+`DATABASE_URL=mysql://bullpane:bullpane@localhost:3306/bullpane` in `.env`.
 
 ## Ground rules
 

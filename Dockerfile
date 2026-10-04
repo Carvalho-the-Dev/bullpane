@@ -66,7 +66,12 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 COPY packages ./packages
 COPY apps/server ./apps/server
 COPY --from=build /app/apps/web/dist ./apps/web/dist
-RUN addgroup -S bullpane && adduser -S bullpane -G bullpane && chown -R bullpane:bullpane /app
+# /data holds the SQLite database used when DATABASE_URL is not set. Mount a
+# volume there (`-v bullpane-data:/data`) or the data dies with the container.
+ENV BULLPANE_DATA_DIR=/data
+RUN addgroup -S bullpane && adduser -S bullpane -G bullpane \
+ && mkdir -p /data && chown -R bullpane:bullpane /app /data
+VOLUME ["/data"]
 USER bullpane
 EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 \

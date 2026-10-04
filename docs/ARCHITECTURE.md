@@ -7,7 +7,7 @@ Pro subscription (USD 39/month or 390/year, one installation) that unlocks team 
 ```
 bullpane/
 ├── apps/
-│   ├── server/          Fastify API + serves the built web UI. Owns MySQL, auth, alerts, licensing.
+│   ├── server/          Fastify API + serves the built web UI. Owns the database, auth, alerts, licensing.
 │   │   └── src/ee/      Pro features (alerts, audit, folders, flows, SSO, user admin). Commercial license.
 │   ├── web/             React + Vite dashboard.
 │   │   └── src/ee/      Pro pages. Commercial license.
@@ -19,7 +19,7 @@ bullpane/
 ├── apps/license-api/        Cloudflare Worker at api.bullpane.com: activates subscription
 │                            keys at the store (Creem) and signs 7-day leases.
 ├── Dockerfile               Multi-stage: build web + server, run one node process.
-├── docker-compose.yml       app + mysql (bring your own Redis).
+├── docker-compose.yml       app on SQLite; COMPOSE_PROFILES=mysql adds MySQL (bring your own Redis).
 └── docker-compose.demo.yml  app + mysql + redis + simulator, DEMO_MODE=true.
 ```
 
@@ -28,16 +28,60 @@ bullpane/
 ```
 Browser ──HTTP/JSON──> Fastify (apps/server)
                          │  auth (cookie session) · role check · pro-feature gate
-                         ├──> MySQL (users, sessions, connections, folders, alerts, flow edges, settings)
+                         ├──> SQLite or MySQL (users, sessions, connections, folders, alerts, flow edges, settings)
                          └──> InspectorPool (packages/redis-inspector)
                                 └──> ioredis per connection ──EVALSHA──> customer Redis
 ```
 
 * The server never touches Redis directly. Everything goes through `Inspector`
   (`packages/redis-inspector/src/types.ts`).
-* The inspector never touches MySQL. It is stateless apart from connection caches.
+* The inspector never touches the database. It is stateless apart from connection caches.
 * The web UI only talks to `/api/*`. It polls; there is no websocket in v1
   (polling with a Lua-backed counts endpoint is one EVALSHA per queue, cheap enough).
+
+## The dashboard's own database: SQLite or MySQL
+
+`DATABASE_URL` unset → SQLite at `BULLPANE_DATA_DIR/bullpane.db` (`/data` in the
+image). `mysql://…` → MySQL. The free edition's whole promise is "start the
+container and open it", and a MySQL to provision was the one step bull-board
+never asked for. MySQL stays for what SQLite cannot do: **more than one
+replica**. SQLite is one file on one disk, so two instances would each have
+their own users and sessions. NFS/EFS is not a disk for this purpose (WAL needs
+shared memory between processes on one host).
+
+How one codebase serves both, in `apps/server/src/db/`:
+
+* **Two schemas, one set of types.** `schema.mysql.ts` and `schema.sqlite.ts`
+  declare the same tables. The SQLite file asserts its row and insert types
+  equal the MySQL ones, so a column added on one side only fails the
+  typecheck. Dates are `DATETIME(3)` on MySQL and epoch-ms `INTEGER` on SQLite —
+  both come back as `Date` with the millisecond the audit cursor pages on.
+* **`schema.ts` picks one at boot.** Services import tables from it, and its
+  exports are `let` bindings reassigned once by `createDatabase()`. ES module
+  bindings are live, so ~70 query sites stay dialect-blind without threading a
+  schema through every constructor. The one rule this imposes: never capture a
+  table in a module-level constant.
+* **`Db` is typed as MySQL on both.** The builder surface the services use is
+  shared, with two exceptions that branch explicitly: the settings upsert
+  (`schemaDialect()`), and the RESULT of a write. mysql2 resolves to
+  `[ResultSetHeader]` with `affectedRows`, libsql to a ResultSet with
+  `rowsAffected` — so a conditional write that counts rows (MCP's single-use
+  codes and refresh rotation) goes through `affectedRows()` in
+  `ee/mcp/store.ts`, which reads both. Reading `res[0].affectedRows` directly
+  is always 0 on SQLite.
+* **Two migration histories.** `migrations/mysql/` is what existing installs
+  already ran (names are recorded without the directory). `migrations/sqlite/`
+  starts at the current schema. A schema change is one file in each, plus both
+  schema files.
+* **`database.integration.test.ts`** boots the real app on a real database,
+  unlocks Pro with a signed license and drives every table through HTTP. It runs
+  on SQLite always, and on MySQL with `BULLPANE_TEST_MYSQL_URL`. The other
+  suites stub `db`, which proves the calls are built but not that a database
+  accepts them.
+
+Known divergence: the MySQL tables use `utf8mb4_unicode_ci`, so queue names that
+differ only in case (`Reports` / `reports`) collide there — hiding one is a
+no-op once the other is hidden. SQLite compares bytes, as BullMQ does.
 
 ## Performance contract (why the inspector exists)
 
@@ -462,7 +506,7 @@ to. The consent request travels through the browser signed (HMAC, 10 min). Codes
 single-use (60 s) and burned on the first attempt, right or wrong. Access tokens are
 signed and short (1 h) and carry only the grant id; refresh tokens rotate, and
 presenting a rotated one again deletes the whole grant — it means the token leaked.
-Codes and refresh tokens are stored as SHA-256. Schema: `migrations/0009_mcp.sql`.
+Codes and refresh tokens are stored as SHA-256. Schema: `migrations/mysql/0009_mcp.sql`.
 A new password or disabling the user deletes their grants, like their sessions.
 
 **Stateless transport.** Streamable HTTP with JSON responses only: no SSE stream and
@@ -543,7 +587,7 @@ every 5 s per connection, so auditing reads would bury the rows that matter.
    the connection name. There is no FK to `users` or `connections`. A trail whose only
    pointer to the person is a foreign key stops meaning anything the day that user is
    gone — and people leaving is the normal audit case, not the edge case. Users are
-   disabled rather than deleted for the same reason (`migrations/0007_user_disabled.sql`),
+   disabled rather than deleted for the same reason (`migrations/mysql/0007_user_disabled.sql`),
    but the log does not lean on that: `GET /audit/actors` reads distinct actors out of
    the log itself, so an actor stays filterable whatever happens to the users table.
 2. **`detail` never holds a job payload.** It carries the parameters of the action; the

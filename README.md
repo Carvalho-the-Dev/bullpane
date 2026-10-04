@@ -60,9 +60,14 @@ and held to it by the harness in [docs/STRESS-TEST.md](docs/STRESS-TEST.md).
 ## Quick start
 
 ```sh
-cp .env.example .env      # nothing to set for the free edition; SESSION_SECRET matters once Pro turns login on
-docker compose up -d      # app on :3000 + MySQL (bring your own Redis)
+docker run -d -p 3000:3000 -v bullpane-data:/data ghcr.io/madmorett/bullpane
 ```
+
+No database to set up: the dashboard keeps its own data (connections,
+settings, and on Pro users, alerts and the audit log) in a SQLite file in
+`/data`. Keep the volume, or that data dies with the container. Prefer
+Compose? `docker compose up -d` does the same with this repository's
+`docker-compose.yml`.
 
 1. Open <http://localhost:3000>. The free edition drops you straight into the
    dashboard — there is nothing to sign up for.
@@ -71,9 +76,12 @@ docker compose up -d      # app on :3000 + MySQL (bring your own Redis)
    cached for 30 s.
 3. That is it. Add more connections for staging/prod, or other prefixes.
 
-Already have MySQL? Set `DATABASE_URL` and delete the `mysql` service from
-`docker-compose.yml`. The image is one Node process: put it behind your reverse
-proxy and set `PUBLIC_URL` so alert links point at the right host.
+MySQL is optional. Running more than one replica, or want a managed database?
+Set `DATABASE_URL=mysql://user:pass@host:3306/bullpane` (MySQL 8 or MariaDB) and
+Bullpane uses it instead. With Compose, `COMPOSE_PROFILES=mysql` in `.env` also
+starts a bundled MySQL (see the header of `docker-compose.yml`). The image is
+one Node process: put it behind your reverse proxy and set `PUBLIC_URL` so alert
+links point at the right host.
 
 Read [docs/PRODUCTION-TRIAL.md](docs/PRODUCTION-TRIAL.md) before pointing it at
 a busy production Redis, and [deploy/README.md](deploy/README.md) for EC2, ECS
@@ -177,9 +185,8 @@ sends on activation, is in [docs/PRO.md](docs/PRO.md).
 
 ```sh
 pnpm install
-docker compose up mysql -d       # MySQL on localhost:3306 (bullpane/bullpane)
 cp .env.example .env
-pnpm dev                         # server :3000 (tsx watch) + web (Vite, proxied)
+pnpm dev                         # server :3000 (tsx watch) + web (Vite, proxied); SQLite in apps/server/data
 pnpm dev:simulator               # optional: fill local Redis with demo traffic
 ```
 
@@ -194,7 +201,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 ## Project layout
 
 ```
-apps/server/               Fastify API + serves the built web UI. MySQL, auth, alerts, licensing.
+apps/server/               Fastify API + serves the built web UI. SQLite/MySQL, auth, alerts, licensing.
 apps/web/                  React + Vite + Tailwind dashboard.
 apps/simulator/            Demo traffic generator + the stress harness.
 apps/website/              bullpane.com (static, Cloudflare Worker).
@@ -203,7 +210,7 @@ packages/shared/           Types + zod schemas. The contract between everything.
 packages/redis-inspector/  ioredis + Lua. Every read of a customer's Redis goes here.
 scripts/gen-license.ts     Ed25519 keypair + license signing (vendor side).
 Dockerfile                 Multi-stage; targets `runner` (dashboard) and `simulator`.
-docker-compose.yml         app + mysql (bring your own Redis).
+docker-compose.yml         app on SQLite; COMPOSE_PROFILES=mysql adds MySQL (bring your own Redis).
 docker-compose.demo.yml    app + mysql + redis + simulator, DEMO_MODE=true.
 ```
 

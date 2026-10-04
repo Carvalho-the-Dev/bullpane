@@ -57,5 +57,5 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // There is deliberately no DELETE /users/:id. Users are disabled through PATCH
-  // { disabled: true } — see migrations/0007_user_disabled.sql for why.
+  // { disabled: true } — see migrations/mysql/0007_user_disabled.sql for why.
 }

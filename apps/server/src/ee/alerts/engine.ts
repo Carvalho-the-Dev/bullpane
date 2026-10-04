@@ -439,10 +439,16 @@ export class AlertsEngine {
   private allConnections(cache: TickCache): Promise<ConnectionRow[]> {
     if (!cache.allConnections) {
       cache.allConnections = this.deps.connections.listRows();
-      // Seed the per-id cache so later lookups do not hit MySQL again.
-      void cache.allConnections.then((rows) => {
-        for (const r of rows) if (!cache.connections.has(r.id)) cache.connections.set(r.id, Promise.resolve(r));
-      });
+      // Seed the per-id cache so later lookups do not hit the database again.
+      // The catch matters: this derived promise has no other listener, so a
+      // failed read (database restarting) would be an unhandled rejection,
+      // which kills the process. The caller awaiting `allConnections` still
+      // sees the error and the tick logs it.
+      cache.allConnections
+        .then((rows) => {
+          for (const r of rows) if (!cache.connections.has(r.id)) cache.connections.set(r.id, Promise.resolve(r));
+        })
+        .catch(() => undefined);
     }
     return cache.allConnections;
   }

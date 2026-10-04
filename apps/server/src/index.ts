@@ -1,5 +1,5 @@
 /**
- * Process entry point: config → MySQL (wait + migrate) → app → seed
+ * Process entry point: config → database (SQLite or MySQL: wait + migrate) → app → seed
  * (BULLPANE_CONNECTIONS, demo) → listen → alerts engine. Graceful shutdown on SIGINT/SIGTERM.
  */
 import { createInspectorPool } from "@bullpane/redis-inspector";
@@ -12,7 +12,7 @@ import { seedConnections } from "./seedConnections";
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env, { warn: (m) => console.warn(`[config] ${m}`) });
-  const database = createDatabase(config.databaseUrl);
+  const database = createDatabase(config.database);
   const pool = createInspectorPool({
     discoveryTtlMs: config.queueDiscoveryTtl * 1000,
     previewBytes: config.jobPreviewBytes,
@@ -21,8 +21,8 @@ async function main(): Promise<void> {
   const app = await buildApp({ config, db: database.db, pool });
   const log = app.log;
 
-  await waitForDatabase(database.pool, log);
-  const { applied } = await runMigrations(database.pool, log);
+  await waitForDatabase(database, log);
+  const { applied } = await runMigrations(database, log);
   if (applied.length) log.info({ applied }, "migrations applied");
 
   const edition = await app.ctx.edition.load();
@@ -61,7 +61,11 @@ async function main(): Promise<void> {
     `  auth    : ${edition.features.users ? "login required" : "OPEN — no login (free edition)"}`,
     `  url     : ${config.publicUrl}  (listening on ${config.host}:${config.port})`,
     `  web ui  : ${config.webDist}`,
-    `  mysql   : ${redactUrl(config.databaseUrl)}`,
+    `  database: ${
+      config.database.dialect === "sqlite"
+        ? `SQLite ${config.database.path} (single instance; set DATABASE_URL=mysql://… to run more than one)`
+        : `MySQL ${redactUrl(config.database.url)}`
+    }`,
     "",
   ].join("\n");
   log.info(banner);

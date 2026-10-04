@@ -11,6 +11,47 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
+## [0.5.1] — 2026-10-04
+
+### Added
+
+- **No database to set up.** Without `DATABASE_URL`, Bullpane now keeps its own
+  data (connections, settings, and on Pro users, alerts, folders, the audit log)
+  in a SQLite file at `BULLPANE_DATA_DIR/bullpane.db` — `/data` in the image.
+  `docker run -p 3000:3000 -v bullpane-data:/data ghcr.io/madmorett/bullpane`
+  is the whole install. Mount a volume on `/data`, or the data dies with the
+  container. `DATABASE_URL=file:/path/to/bullpane.db` picks another file.
+- **MySQL is unchanged and still supported.** An install that sets
+  `DATABASE_URL=mysql://…` keeps using MySQL, with the same schema and no
+  migration on upgrade. Use MySQL when you run more than one replica: SQLite is
+  one file on one disk, so two instances would each see their own users and
+  sessions. Do not put the SQLite file on NFS/EFS. There is no SQLite → MySQL
+  data migration yet.
+
+### Changed
+
+- The default when `DATABASE_URL` is unset used to be
+  `mysql://bullpane:bullpane@localhost:3306/bullpane`. It is now SQLite. Every
+  compose file and deploy script in this repository sets `DATABASE_URL`
+  explicitly; an install that relied on the old default must set it to keep
+  its MySQL data. The boot banner says which database is in use.
+- `docker-compose.yml` starts MySQL only when asked: `COMPOSE_PROFILES=mysql`
+  plus `DATABASE_URL=mysql://bullpane:bullpane@mysql:3306/bullpane` in `.env`.
+  Without them it runs the app alone on SQLite. The company/trial composes and
+  the EC2 installer still bundle MySQL. **If you ran this repository's
+  `docker-compose.yml` with its bundled MySQL**, add those two lines before
+  updating: the volume is the same `mysql-data`, so your data is where you left
+  it. Without them the app starts on an empty SQLite database.
+- A `DATABASE_URL` that is neither `mysql://` nor `file:` now stops the boot
+  with an error instead of being handed to the MySQL driver.
+
+### Fixed
+
+- **A database blip during an alerts tick no longer crashes the server (Pro).**
+  With a rule covering every queue — the default rule is one — a failed read of
+  the connection list left an unhandled promise rejection, which stops a Node 22
+  process. The tick now fails, logs, and the next one runs.
+
 ## [0.5.0] — 2026-10-04
 
 ### Added

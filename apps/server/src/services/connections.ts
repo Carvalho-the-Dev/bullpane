@@ -252,7 +252,7 @@ export class ConnectionsService {
   //       (GET /connections/:id/queues/:queue is untouched).
   // Hiding is about the LIST, not about switching the queue off.
   //
-  // Scope is the instance, not the user — see migrations/0003_hidden_queues.sql.
+  // Scope is the instance, not the user — see migrations/mysql/0003_hidden_queues.sql.
   // -------------------------------------------------------------------------
 
   /** Names hidden on this connection, as a Set for O(1) filtering. */
