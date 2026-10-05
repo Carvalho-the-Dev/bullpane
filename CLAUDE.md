@@ -35,7 +35,10 @@ Postgres backend, `pg-inspector`; see `docs/POSTGRES.md`).
   per read, and the dashboard never runs BullMQ's migrations. Every connection has a
   `kind`; a new Inspector method needs both implementations.
 - Must keep working with BullMQ Pro (groups/batches). Pro key names live in
-  `packages/redis-inspector/src/keys.ts` only.
+  `packages/redis-inspector/src/keys.ts` only. Writes on Pro queues go through
+  BullMQ Pro's own API when the customer installed it (optional, never bundled), and
+  writes core bullmq would get wrong on a group are refused otherwise
+  (`bullmqPro.ts`, docs/BULLMQ-PRO.md).
 
 ## Language
 

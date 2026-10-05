@@ -6,9 +6,9 @@
  */
 import { createServer, type AddressInfo } from "node:net";
 import { execSync } from "node:child_process";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import Redis from "ioredis";
-import { FlowProducer, Queue, Worker, type Job } from "bullmq";
+import { FlowProducer, Queue, Worker, type Job, type QueueOptions } from "bullmq";
 import { JOB_STATES } from "@bullpane/shared";
 import {
   RedisInspector,
@@ -1406,5 +1406,117 @@ describe("stalled (auxiliary SET, not a state)", () => {
     const page = await inspector.getJobs("no-stall", "waiting", { start: 0, end: -1, order: "desc" });
     expect(page.jobs.find((j) => j.id === id)!.stalledCounter).toBe(0);
     expect(JOB_STATES as readonly string[]).not.toContain("stalled");
+  });
+});
+
+describe("writes on BullMQ Pro queues", () => {
+  // A Pro queue without a Pro token: the group keys and the group id on the job hash
+  // are written by hand, in the layout keys.ts documents (verified against 7.48).
+  async function proQueue(name: string) {
+    const queue = q(name);
+    await raw.zadd(`bull:${name}:groups`, 1, "tenant-a");
+    const grouped = async (opts: { delay?: number } = {}) => {
+      const job = await queue.add("send", { to: "x" }, opts);
+      const key = `bull:${name}:${job.id}`;
+      const jobOpts = JSON.parse((await raw.hget(key, "opts")) ?? "{}");
+      await raw.hset(key, "opts", JSON.stringify({ ...jobOpts, group: { id: "tenant-a" } }));
+      return job.id!;
+    };
+    return { queue, grouped };
+  }
+
+  describe("without BullMQ Pro's API", () => {
+    it("refuses to promote a grouped job, which core bullmq would run outside its group", async () => {
+      const { queue, grouped } = await proQueue("pro-promote");
+      const id = await grouped({ delay: 60_000 });
+      await expect(inspector.promoteJob("pro-promote", id)).rejects.toThrow(/bullmq_pro_api_required: promoting a job of group tenant-a/);
+      expect(await (await queue.getJob(id))!.getState()).toBe("delayed");
+      const bulk = await inspector.bulkJobAction("pro-promote", "promote", [id]);
+      expect(bulk.failed[0]?.reason).toMatch(/bullmq_pro_api_required/);
+    });
+    it("still promotes a job without a group on a Pro queue", async () => {
+      const { queue } = await proQueue("pro-plain");
+      const job = await queue.add("plain", {}, { delay: 60_000 });
+      await expect(inspector.promoteJob("pro-plain", job.id!)).resolves.toEqual({ mode: "promoted" });
+      expect(await job.getState()).toBe("waiting");
+    });
+    it("removes a delayed grouped job (queue-wide keys) but not a waiting one (group list)", async () => {
+      const { grouped } = await proQueue("pro-remove");
+      const delayed = await grouped({ delay: 60_000 });
+      await inspector.removeJob("pro-remove", delayed);
+      expect(await raw.exists(`bull:pro-remove:${delayed}`)).toBe(0);
+
+      // a waiting job of a group lives in the group's list, not in `wait`
+      await raw.hset("bull:pro-remove:w1", "name", "send", "data", "{}", "opts", "{}", "timestamp", String(Date.now()), "gid", "tenant-a");
+      await raw.lpush("bull:pro-remove:groups:tenant-a", "w1");
+      await expect(inspector.removeJob("pro-remove", "w1")).rejects.toThrow(/removing a waiting job of group tenant-a/);
+      expect(await raw.exists("bull:pro-remove:w1")).toBe(1);
+    });
+    it("refuses retry of a grouped job, add with opts.group and the queue-wide writes", async () => {
+      const { queue, grouped } = await proQueue("pro-queue-ops");
+      const id = await grouped();
+      await raw.lrem("bull:pro-queue-ops:wait", 0, id);
+      await raw.zadd("bull:pro-queue-ops:failed", Date.now(), id);
+      await expect(inspector.retryJob("pro-queue-ops", id)).rejects.toThrow(/retrying a job of group tenant-a/);
+      await expect(inspector.addJob("pro-queue-ops", "send", {}, { group: { id: "tenant-a" } })).rejects.toThrow(/adding a job to a group/);
+      await expect(inspector.retryAll("pro-queue-ops", "failed")).rejects.toThrow(/bullmq_pro_api_required/);
+      await expect(inspector.drainQueue("pro-queue-ops", false)).rejects.toThrow(/draining a BullMQ Pro queue/);
+      await expect(inspector.obliterateQueue("pro-queue-ops")).rejects.toThrow(/obliterating a BullMQ Pro queue/);
+      expect(await queue.getJobCountByTypes("failed")).toBe(1);
+    });
+    it("says the group actions need Pro", async () => {
+      expect(inspector.bullmqProApi).toBe(false);
+      await expect(inspector.pauseGroup("pro-queue-ops", "tenant-a")).rejects.toThrow(/bullmq_pro_api_required: pausing a group/);
+      await expect(inspector.drainGroup("pro-queue-ops", "tenant-a")).rejects.toThrow(/bullmq_pro_api_required: draining a group/);
+    });
+  });
+
+  describe("with BullMQ Pro's API", () => {
+    // Stands in for @taskforcesh/bullmq-pro: a Queue subclass with the group methods.
+    const built: string[] = [];
+    const calls = { deleteGroup: vi.fn(), deleteGroups: vi.fn(), pauseGroup: vi.fn(), resumeGroup: vi.fn() };
+    class FakeQueuePro extends Queue {
+      constructor(name: string, opts: QueueOptions) {
+        super(name, opts);
+        built.push(name);
+      }
+      async deleteGroup(id: string) { calls.deleteGroup(this.name, id); }
+      async deleteGroups() { calls.deleteGroups(this.name); }
+      async pauseGroup(id: string) { calls.pauseGroup(this.name, id); return true; }
+      async resumeGroup(id: string) { calls.resumeGroup(this.name, id); return true; }
+    }
+    let pro: RedisInspector;
+    beforeAll(() => {
+      pro = new RedisInspector({ id: "pro", url: URL }, { bullmqPro: { QueuePro: FakeQueuePro } });
+    });
+    afterAll(async () => {
+      await pro.close();
+    });
+
+    it("promotes a grouped job through QueuePro", async () => {
+      const { grouped } = await proQueue("pro-api-promote");
+      const id = await grouped({ delay: 60_000 });
+      expect(pro.bullmqProApi).toBe(true);
+      await expect(pro.promoteJob("pro-api-promote", id)).resolves.toEqual({ mode: "promoted" });
+      expect(built).toContain("pro-api-promote");
+    });
+    it("runs the group actions and empties the groups on drain", async () => {
+      await proQueue("pro-api-groups");
+      await pro.pauseGroup("pro-api-groups", "tenant-a");
+      await pro.resumeGroup("pro-api-groups", "tenant-a");
+      await pro.drainGroup("pro-api-groups", "tenant-a");
+      expect(calls.pauseGroup).toHaveBeenCalledWith("pro-api-groups", "tenant-a");
+      expect(calls.resumeGroup).toHaveBeenCalledWith("pro-api-groups", "tenant-a");
+      expect(calls.deleteGroup).toHaveBeenCalledWith("pro-api-groups", "tenant-a");
+      await pro.drainQueue("pro-api-groups", false);
+      expect(calls.deleteGroups).toHaveBeenCalledWith("pro-api-groups");
+    });
+    it("keeps core bullmq for a queue that is not Pro", async () => {
+      const queue = q("plain-with-pro-api");
+      const job = await queue.add("plain", {}, { delay: 60_000 });
+      await pro.promoteJob("plain-with-pro-api", job.id!);
+      expect(built).not.toContain("plain-with-pro-api");
+      expect(await job.getState()).toBe("waiting");
+    });
   });
 });

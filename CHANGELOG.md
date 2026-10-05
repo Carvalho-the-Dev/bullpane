@@ -11,6 +11,33 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
+## [Unreleased]
+
+### Added
+
+- **Pause, resume and drain a BullMQ Pro group** from the group page, and from MCP:
+  `pause_group` and `resume_group` are tools, and `request_destructive_action` with
+  `drain_group` returns a link to the confirmation dialog. Drain is admin, like
+  draining a queue. These are BullMQ Pro operations, so they need Pro's own package
+  installed next to Bullpane. Bullpane does not bundle it; set `BULLMQ_PRO_DIR` to
+  a folder where you installed it with your token. See `docs/BULLMQ-PRO.md`. (#10)
+
+### Fixed
+
+- **Job actions no longer take a job out of its BullMQ Pro group.** Core bullmq's
+  promote and retry put a grouped job in the queue-wide wait list, where a Pro
+  worker runs it with no group concurrency or rate limit, even while its group is
+  paused. Its remove left a waiting job's id in the group's list. With BullMQ Pro's
+  package installed, every write on a Pro queue now runs Pro's own scripts.
+  Without it, these writes are refused with `409 bullmq_pro_api_required`:
+  - promote or retry of a grouped job;
+  - remove of a waiting grouped job;
+  - add with `opts.group`;
+  - retry all, drain or obliterate on a Pro queue.
+
+  Everything else keeps working, including removing delayed, completed or failed
+  grouped jobs.
+
 ## [0.6.0] — 2026-10-04
 
 ### Added

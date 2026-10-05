@@ -58,6 +58,13 @@ export interface Config {
    * Terraform, a read-only public demo) gets its Redis without a click.
    */
   seedConnections: CreateConnectionInput[];
+  /**
+   * BULLMQ_PRO_DIR: a folder where `@taskforcesh/bullmq-pro` was `npm install`ed
+   * (the Docker recipe in docs/BULLMQ-PRO.md). Unset: Bullpane looks in its own
+   * node_modules. Without the package, writes core bullmq would get wrong on a
+   * BullMQ Pro group are refused.
+   */
+  bullmqProDir: string | null;
   demoRedisUrl: string;
   demoAdminEmail: string;
   demoAdminPassword: string;
@@ -206,6 +213,7 @@ export function loadConfig(rawEnv: NodeJS.ProcessEnv = process.env, opts: LoadCo
     allowPasswordLogin: bool(env, "BULLPANE_ALLOW_PASSWORD_LOGIN", false),
     readOnly: bool(env, "BULLPANE_READ_ONLY", false),
     seedConnections: connections(env, "BULLPANE_CONNECTIONS"),
+    bullmqProDir: optional(env, "BULLMQ_PRO_DIR"),
     demoRedisUrl: str(env, "DEMO_REDIS_URL", "redis://localhost:6379"),
     demoAdminEmail: str(env, "DEMO_ADMIN_EMAIL", "demo@bullpane.com"),
     demoAdminPassword: str(env, "DEMO_ADMIN_PASSWORD", "demo1234"),

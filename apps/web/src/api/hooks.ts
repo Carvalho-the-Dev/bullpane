@@ -33,7 +33,7 @@ import type {
   FlowGraph,
   Folder,
   DiscoveryStatus,
-  GroupsPage,
+  GroupsResponse,
   HiddenQueue,
   JobDetail,
   JobSearchResult,
@@ -543,10 +543,23 @@ export function useGroups(cid: string | undefined, queue: string | undefined, pa
   return useQuery({
     queryKey: qk.groups(cid ?? "", queue ?? "", params),
     queryFn: () =>
-      api.get<GroupsPage>(`${queuePath(cid!, queue!)}/groups`, { query: { ...params } }),
+      api.get<GroupsResponse>(`${queuePath(cid!, queue!)}/groups`, { query: { ...params } }),
     enabled: !!cid && !!queue,
     refetchInterval: poll(POLL.queues),
     placeholderData: keepPreviousData,
+  });
+}
+
+export type GroupActionKind = "pause" | "resume" | "drain";
+
+/** BullMQ Pro's group operations; the server answers 409 bullmq_pro_api_required without its package. */
+export function useGroupAction(cid: string, queue: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupId, action }: { groupId: string; action: GroupActionKind }) =>
+      api.post<{ ok: boolean }>(`${queuePath(cid, queue)}/groups/${seg(groupId)}/${action}`),
+    // qk.queue is the prefix of the groups list, the group's jobs and the queue summary.
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.queue(cid, queue) }),
   });
 }
 

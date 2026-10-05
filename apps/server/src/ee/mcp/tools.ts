@@ -342,17 +342,47 @@ export const MCP_TOOLS: McpTool[] = [
     run: (a, ctx) => forward(ctx, { method: "POST", url: `${queuePath(a)}/resume` }),
   }),
 
+  tool({
+    name: "pause_group",
+    title: "Pause a group (BullMQ Pro)",
+    description: "Pauses one BullMQ Pro group: its jobs keep arriving, none are processed. Needs BullMQ Pro's package installed next to Bullpane.",
+    access: "write",
+    inputSchema: object({ ...QUEUE, group_id: str("Group id") }, ["connection_id", "queue", "group_id"]),
+    annotations: rw(false, true),
+    schema: zQueue.extend({ group_id: z.string().min(1).max(200) }),
+    run: (a, ctx) => forward(ctx, { method: "POST", url: `${queuePath(a)}/groups/${seg(a.group_id)}/pause` }),
+  }),
+  tool({
+    name: "resume_group",
+    title: "Resume a group (BullMQ Pro)",
+    description: "Resumes a paused BullMQ Pro group. Needs BullMQ Pro's package installed next to Bullpane.",
+    access: "write",
+    inputSchema: object({ ...QUEUE, group_id: str("Group id") }, ["connection_id", "queue", "group_id"]),
+    annotations: rw(false, true),
+    schema: zQueue.extend({ group_id: z.string().min(1).max(200) }),
+    run: (a, ctx) => forward(ctx, { method: "POST", url: `${queuePath(a)}/groups/${seg(a.group_id)}/resume` }),
+  }),
+
   // ----- destructive: a link, never an action -----
   tool({
     name: "request_destructive_action",
     title: "Drain, clean or obliterate (link to the dashboard)",
     description:
-      "Bullpane never drains, cleans or obliterates a queue from MCP. This returns a dashboard link that opens the confirmation dialog for that action; give it to the user so they can review and confirm it themselves.",
+      "Bullpane never drains, cleans or obliterates a queue, or drains a BullMQ Pro group, from MCP. This returns a dashboard link that opens the confirmation dialog for that action; give it to the user so they can review and confirm it themselves. drain_group needs group_id.",
     access: "read",
-    inputSchema: object({ ...QUEUE, action: str("Action", { enum: ["drain", "clean", "obliterate"] }) }, ["connection_id", "queue", "action"]),
+    inputSchema: object(
+      { ...QUEUE, action: str("Action", { enum: ["drain", "clean", "obliterate", "drain_group"] }), group_id: str("Group id, for drain_group") },
+      ["connection_id", "queue", "action"],
+    ),
     annotations: ro,
-    schema: zQueue.extend({ action: z.enum(["drain", "clean", "obliterate"]) }),
+    schema: zQueue
+      .extend({ action: z.enum(["drain", "clean", "obliterate", "drain_group"]), group_id: z.string().min(1).max(200).optional() })
+      .refine((a) => a.action !== "drain_group" || !!a.group_id, { message: "drain_group needs group_id", path: ["group_id"] }),
     run: async (a, ctx) => {
+      if (a.action === "drain_group") {
+        const url = `${ctx.publicUrl}/c/${seg(a.connection_id)}/q/${seg(a.queue)}/groups/${seg(a.group_id ?? "")}?confirm=drain`;
+        return textResult({ url, message: "Bullpane does not drain groups from MCP. Open this link to review and confirm it in the dashboard (it requires the admin role)." });
+      }
       const url = `${ctx.publicUrl}/c/${seg(a.connection_id)}/q/${seg(a.queue)}?confirm=${a.action}`;
       return textResult({
         url,

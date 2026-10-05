@@ -690,6 +690,20 @@ export class PgInspector implements Inspector {
     return { jobs: [], total: 0, start: opts.start, end: opts.end };
   }
 
+  readonly bullmqProApi = false;
+
+  async pauseGroup(): Promise<void> {
+    throw new Error("groups_not_supported: the Postgres backend has no BullMQ Pro groups");
+  }
+
+  async resumeGroup(): Promise<void> {
+    throw new Error("groups_not_supported: the Postgres backend has no BullMQ Pro groups");
+  }
+
+  async drainGroup(): Promise<void> {
+    throw new Error("groups_not_supported: the Postgres backend has no BullMQ Pro groups");
+  }
+
   // ---------------------------------------------------------------------------
   // job schedulers
   // ---------------------------------------------------------------------------

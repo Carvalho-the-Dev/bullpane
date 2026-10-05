@@ -85,6 +85,10 @@ const ROUTE_ACTIONS: Record<string, AuditAction> = {
   "POST /api/connections/:id/queues/:queue/drain": "queue.drain",
   "POST /api/connections/:id/queues/:queue/obliterate": "queue.obliterate",
   "DELETE /api/connections/:id/queues/:queue/schedulers/:key": "scheduler.remove",
+  // BullMQ Pro groups
+  "POST /api/connections/:id/queues/:queue/groups/:groupId/pause": "group.pause",
+  "POST /api/connections/:id/queues/:queue/groups/:groupId/resume": "group.resume",
+  "POST /api/connections/:id/queues/:queue/groups/:groupId/drain": "group.drain",
   "POST /api/connections/:id/hidden-queues": "queue.hide",
   "DELETE /api/connections/:id/hidden-queues/:queueName": "queue.unhide",
   // connections

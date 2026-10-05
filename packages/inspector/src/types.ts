@@ -82,6 +82,13 @@ export interface InspectorOptions {
   searchFieldCapBytes?: number;
   /** payload bytes one search call may copy before handing back a cursor. default 8 MiB */
   searchByteBudget?: number;
+  /**
+   * BullMQ Pro's module, from `loadBullmqPro` (Redis only). When present, writes on
+   * Pro queues go through QueuePro / JobPro and the group actions are available;
+   * when absent, the writes core bullmq would get wrong on a group are refused.
+   * Typed loosely here so this contract does not depend on redis-inspector.
+   */
+  bullmqPro?: unknown;
 }
 
 export interface QueueStats {
@@ -334,6 +341,18 @@ export interface Inspector {
   retryAll(queueName: string, state: "failed" | "completed"): Promise<void>;
   drainQueue(queueName: string, includeDelayed: boolean): Promise<void>;
   obliterateQueue(queueName: string): Promise<void>;
+
+  // --- BullMQ Pro groups (write) -------------------------------------------
+  /**
+   * true when BullMQ Pro's API is loaded (see InspectorOptions.bullmqPro). The group
+   * actions below throw `bullmq_pro_api_required` without it: they only exist in Pro.
+   */
+  readonly bullmqProApi: boolean;
+  /** QueuePro.pauseGroup: jobs keep arriving, none of the group's are processed */
+  pauseGroup(queueName: string, groupId: string): Promise<void>;
+  resumeGroup(queueName: string, groupId: string): Promise<void>;
+  /** QueuePro.deleteGroup: removes the group's waiting and prioritized jobs, then the group */
+  drainGroup(queueName: string, groupId: string): Promise<void>;
 }
 
 export interface InspectorPool {
