@@ -11,6 +11,20 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
+## [Unreleased]
+
+### Fixed
+
+- **A BullMQ Pro group's delayed jobs can be found and acted on.** Pro keeps
+  only waiting jobs under their group; delayed (and failed, completed, active)
+  ones sit in the queue's own states, so the group filter showed nothing and a
+  group with only delayed jobs was not even listed. The group filter on the
+  queue page now works on every tab: on Delayed it scans the state for that
+  group's jobs, a bounded call at a time that never reads payloads of other
+  groups, and the results can be promoted or removed one by one or in bulk.
+  The group page links to its delayed, failed and completed jobs, and the MCP
+  `search_jobs` tool takes `group_id`. (#9)
+
 ## [0.6.0] — 2026-10-04
 
 ### Added

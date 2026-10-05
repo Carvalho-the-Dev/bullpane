@@ -12,6 +12,9 @@ export const routes = {
   /** deep link that opens the queue with the job-data search focused */
   queueSearch: (cid: string, q: string, state?: JobState) =>
     `/c/${e(cid)}/q/${e(q)}?search=1${state ? `&state=${state}` : ""}`,
+  /** a BullMQ Pro group's jobs in one state, on the queue page */
+  queueGroup: (cid: string, q: string, groupId: string, state: JobState) =>
+    `/c/${e(cid)}/q/${e(q)}?state=${state}&group=${e(groupId)}`,
   job: (cid: string, q: string, id: string) => `/c/${e(cid)}/q/${e(q)}/j/${e(id)}`,
   /** parent/child tree of the flow this job belongs to */
   jobTree: (cid: string, q: string, id: string) => `/c/${e(cid)}/q/${e(q)}/j/${e(id)}/tree`,

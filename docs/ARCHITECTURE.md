@@ -584,6 +584,15 @@ against `@taskforcesh/bullmq-pro` 7.48.0. The facts that shape the reader:
   maintained in that case. The UI says "worker default" when no override exists instead of
   guessing a number.
 - `groups:${gid}:meta` matches the discovery pattern `*:meta`; discovery drops those names.
+- Only **waiting** jobs live under their group (`groups:${gid}`, `groups:${gid}:p`). Delayed,
+  active, failed and completed jobs sit in the queue-wide state keys, marked by the group id on
+  the hash (`gid`) or in `opts.group.id`, and a group whose jobs are all delayed is in none of
+  the four status zsets until one becomes due. No key counts a group's delayed jobs, so the
+  groups page cannot show them; the queue page lists them by running the bounded search with
+  a group filter (`searchJobs.lua`, ARGV `group`). A job outside the group costs one HMGET of
+  its group fields and opts and its payload is never read, which is why a group scan inspects
+  `groupScanPerCall` (10 000) jobs per call, and the UI chains up to 10 calls before asking
+  for "Scan more".
 
 Reads are read-only, one EVALSHA per page (`getGroups.lua`). The simulator writes the same
 layout so the demo shows groups without needing a Pro token.
