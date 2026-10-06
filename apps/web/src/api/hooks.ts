@@ -16,6 +16,8 @@ import type {
   BulkJobAction,
   BulkJobActionResult,
   PromoteJobResult,
+  PromoteMatchingInput,
+  PromoteMatchingResult,
   SchedulerPromoteMode,
   AuditAction,
   AuditPage,
@@ -549,6 +551,15 @@ export function useGroups(cid: string | undefined, queue: string | undefined, pa
     enabled: !!cid && !!queue,
     refetchInterval: poll(POLL.queues),
     placeholderData: keepPreviousData,
+  });
+}
+
+/** One bounded call of POST /jobs/promote-matching; PromoteMatchingDialog loops over the cursor. */
+export function usePromoteMatching(cid: string, queue: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: PromoteMatchingInput) => api.post<PromoteMatchingResult>(`${queuePath(cid, queue)}/jobs/promote-matching`, input),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.queue(cid, queue) }),
   });
 }
 

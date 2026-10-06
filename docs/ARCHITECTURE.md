@@ -266,6 +266,17 @@ decisions that shape it are the **explicit 500-id ceiling** validated in zod
 and the click, and aborting on the first error would hide the 47 that worked.
 Concurrency is capped at 8, not `Promise.all` over 500.
 
+**Past the 500, there is promote-matching.** "Run this group now" or "run this campaign
+now" is thousands of delayed jobs nobody selects by hand. `Inspector.promoteMatching`
+reuses the search script over `delayed` (group filter and / or substring, payload
+previews cut to 0 bytes since only ids are needed), stops after `PROMOTE_MATCHING_LIMIT`
+matches or 50 slices, and promotes them through `promoteJob`, so grouped jobs go back
+into their group on a Pro queue. The cursor it returns is the scan position minus the
+jobs it promoted: they left the part already scanned, so the rest moved up. The UI
+loops over the cursor with a running count and a stop button. On the queue page a
+group filter brings a toolbar with the group actions (pause, resume, promote all
+delayed, drain), so a group Pro has not indexed (only delayed jobs) gets them too.
+
 On the web side the selection is keyed by **jobId, never by index**
 (`apps/web/src/lib/useJobSelection.ts`). The table repolls every 3 s and rows
 change position — that is already the cause of mis-clicks today, and a stored

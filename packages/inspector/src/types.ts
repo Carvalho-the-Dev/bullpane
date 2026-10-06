@@ -29,6 +29,7 @@ import type {
   JobSearchResult,
   JobState,
   PromoteJobResult,
+  PromoteMatchingResult,
   SchedulerPromoteMode,
   QueueCounts,
   QueueMetrics,
@@ -354,6 +355,17 @@ export interface Inspector {
    *    not in a `Promise.all` of 500, so Redis is not flooded.
    */
   bulkJobAction(queueName: string, action: BulkJobAction, jobIds: string[]): Promise<BulkJobActionResult>;
+  /**
+   * Promote the delayed jobs that match `query` and / or BullMQ Pro `groupId`, beyond
+   * the 500-id bulk ceiling: scans the delayed state in bounded slices (the search
+   * script), stops after `limit` matches, then promotes them with `promoteJob` (so
+   * Pro-aware, BULK_CONCURRENCY at a time). `nextCursor` continues the scan.
+   */
+  promoteMatching(
+    queueName: string,
+    match: { query?: string; groupId?: string },
+    opts: { cursor?: string | null; limit: number },
+  ): Promise<PromoteMatchingResult>;
   /** Move an active/stalled job back to failed with a reason (operator "discard") */
   discardJob(queueName: string, jobId: string): Promise<void>;
   pauseQueue(queueName: string): Promise<void>;

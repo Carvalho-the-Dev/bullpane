@@ -24,6 +24,7 @@ import {
   type JobsPage,
   type JobSummary,
   type PromoteJobResult,
+  type PromoteMatchingResult,
   type SchedulerPromoteMode,
   type QueueCounts,
   type QueueMetrics,
@@ -128,6 +129,8 @@ const STATS_METRIC_POINTS = 60;
  * about the same time and keeps Redis breathing.
  */
 const BULK_CONCURRENCY = 8;
+/** Search slices one promoteMatching call may run before handing back a cursor. */
+const PROMOTE_MATCHING_MAX_CALLS = 50;
 /** Trailing window for QueueRates (success / failure %). */
 const DEFAULT_RATE_WINDOW_MINUTES = 60;
 /**
@@ -719,6 +722,51 @@ export class RedisInspector implements Inspector {
       total: asNumber(reply[3]),
       skippedLargePayloads: asNumber(reply[4]),
     };
+  }
+
+  /**
+   * The search script over `delayed`, with payload previews cut to 0 bytes: only
+   * the ids are needed. Runs slice after slice until `limit` matches or
+   * PROMOTE_MATCHING_MAX_CALLS calls, so one request stays bounded on a state of
+   * millions. Each slice is the same bounded call the search box makes.
+   */
+  private async scanDelayedIds(
+    queueName: string,
+    match: { query: string; groupId: string },
+    cursor: number,
+    limit: number,
+  ): Promise<{ ids: string[]; scanned: number; total: number; end: number; exhausted: boolean }> {
+    const c = await this.ensureConnected();
+    const ids: string[] = [];
+    let scanned = 0;
+    let total = 0;
+    let at = cursor;
+    for (let call = 0; call < PROMOTE_MATCHING_MAX_CALLS && ids.length < limit; call++) {
+      const reply = asArray(
+        await callScript(c, "getJobsSearch", [
+          stateKey(this.config.prefix, queueName, "delayed"),
+          STATE_KEY.delayed.type,
+          at,
+          match.groupId && !match.query ? this.opts.groupScanPerCall : this.opts.maxScanPerCall,
+          match.query.toLowerCase(),
+          limit - ids.length,
+          queueKeyPrefix(this.config.prefix, queueName),
+          0,
+          this.opts.searchFieldCapBytes,
+          this.opts.searchByteBudget,
+          match.groupId,
+          GROUP_ID_FIELDS.join(","),
+          ...JOB_SUMMARY_FIELDS,
+        ]),
+      );
+      for (const row of asArray(reply[0])) ids.push(String(asArray(row)[0]));
+      scanned += asNumber(reply[2]);
+      total = asNumber(reply[3]);
+      const next = asNumber(reply[1], -1);
+      if (next < 0) return { ids, scanned, total, end: at + asNumber(reply[2]), exhausted: true };
+      at = next;
+    }
+    return { ids, scanned, total, end: at, exhausted: false };
   }
 
   async getJob(queueName: string, jobId: string): Promise<JobDetail | null> {
@@ -1320,6 +1368,38 @@ export class RedisInspector implements Inspector {
       await Promise.all(ids.slice(i, i + BULK_CONCURRENCY).map(run));
     }
     return { action, ok, failed, requested: ids.length };
+  }
+
+  async promoteMatching(
+    queueName: string,
+    match: { query?: string; groupId?: string },
+    opts: { cursor?: string | null; limit: number },
+  ): Promise<PromoteMatchingResult> {
+    const query = match.query?.trim() ?? "";
+    const groupId = match.groupId ?? "";
+    if (!query && !groupId) throw new Error("query_or_group_required");
+    const cursor = Math.max(0, toInt(opts.cursor ?? "0", 0));
+    const scan = await this.scanDelayedIds(queueName, { query, groupId }, cursor, Math.max(1, opts.limit));
+
+    let promoted = 0;
+    const failed: BulkJobFailure[] = [];
+    let failedCount = 0;
+    const run = async (jobId: string): Promise<void> => {
+      try {
+        await this.promoteJob(queueName, jobId);
+        promoted++;
+      } catch (err) {
+        failedCount++;
+        if (failed.length < 20) failed.push({ jobId, reason: errorMessage(err) });
+      }
+    };
+    for (let i = 0; i < scan.ids.length; i += BULK_CONCURRENCY) {
+      await Promise.all(scan.ids.slice(i, i + BULK_CONCURRENCY).map(run));
+    }
+    // The cursor is an index into `delayed`, newest first. Every promoted job left
+    // the part already scanned, so the rest of the state moved up by that many.
+    const next = scan.exhausted ? null : String(Math.max(0, scan.end - promoted));
+    return { matched: scan.ids.length, promoted, failed, failedCount, scanned: scan.scanned, total: scan.total, nextCursor: next };
   }
 
   /**

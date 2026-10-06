@@ -13,6 +13,21 @@ written from this file — when you add an entry here, mirror it there
 
 ## [Unreleased]
 
+### Added
+
+- **Promote every delayed job of a group, or of a search.** "Promote all
+  delayed" on a group, and "Promote all matches" on a search in the delayed
+  tab, promote every matching job, not only the 500 that fit a selection.
+  Each server call is bounded (2000 promotions, a capped number of scan
+  slices) and returns a cursor; the dialog loops, counts and can stop between
+  calls. On a BullMQ Pro queue the jobs go back into their group. API:
+  `POST …/jobs/promote-matching`; MCP: `promote_matching`.
+- **Group actions on the queue page.** With a group filter on, a toolbar
+  pauses, resumes, promotes all delayed of, or drains that group, and links to
+  its page. That includes groups Pro has not indexed because all their jobs
+  are delayed, which the groups page cannot list: pausing one works and its
+  jobs join it paused.
+
 ### Fixed
 
 - **The waiting count of a BullMQ Pro queue counts the jobs waiting in groups.**

@@ -356,6 +356,23 @@ export const MCP_TOOLS: McpTool[] = [
   }),
 
   tool({
+    name: "promote_matching",
+    title: "Promote every matching delayed job",
+    description:
+      "Promotes the delayed jobs of a BullMQ Pro group (group_id) and / or whose id, name or data contains query, beyond the 500-id limit of bulk_job_action. Each call promotes at most 2000 and returns next_cursor: call again with it until it is null. Grouped jobs go back into their group (needs BullMQ Pro's package next to Bullpane).",
+    access: "write",
+    inputSchema: object(
+      { ...QUEUE, query: str("Text the job id, name or data must contain"), group_id: str("BullMQ Pro group id (exact)"), cursor: str("next_cursor of the previous call") },
+      ["connection_id", "queue"],
+    ),
+    annotations: rw(false, false),
+    schema: zQueue
+      .extend({ query: z.string().max(500).optional(), group_id: z.string().min(1).max(200).optional(), cursor: z.string().max(20).optional() })
+      .refine((a) => !!a.query?.trim() || !!a.group_id, { message: "query or group_id is required", path: ["query"] }),
+    run: (a, ctx) =>
+      forward(ctx, { method: "POST", url: `${queuePath(a)}/jobs/promote-matching`, body: { query: a.query, groupId: a.group_id, cursor: a.cursor } }),
+  }),
+  tool({
     name: "pause_group",
     title: "Pause a group (BullMQ Pro)",
     description: "Pauses one BullMQ Pro group: its jobs keep arriving, none are processed. Needs BullMQ Pro's package installed next to Bullpane.",

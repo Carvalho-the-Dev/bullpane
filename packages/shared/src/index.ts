@@ -1188,6 +1188,41 @@ export interface BulkJobActionResult {
   requested: number;
 }
 
+/**
+ * Delayed jobs one promote-matching call promotes at most. A group or a search can
+ * match tens of thousands of jobs: each call scans in bounded slices, promotes up
+ * to this many (bounded concurrency, like bulk actions) and hands back a cursor.
+ */
+export const PROMOTE_MATCHING_LIMIT = 2000;
+
+/**
+ * Promote every delayed job that matches, not only the ones on screen: the jobs of
+ * one BullMQ Pro group (`groupId`), the ones whose id / name / data contains
+ * `query`, or both. `cursor` continues a previous call.
+ */
+export const promoteMatchingSchema = z
+  .object({
+    query: z.string().max(500).optional(),
+    groupId: z.string().min(1).max(200).optional(),
+    cursor: z.string().max(20).optional(),
+  })
+  .refine((v) => !!v.query?.trim() || v.groupId !== undefined, { message: "query or groupId is required", path: ["query"] });
+export type PromoteMatchingInput = z.infer<typeof promoteMatchingSchema>;
+
+export interface PromoteMatchingResult {
+  /** delayed jobs that matched in this call */
+  matched: number;
+  promoted: number;
+  /** at most 20 of the failures, with BullMQ's reason; `failedCount` has them all */
+  failed: BulkJobFailure[];
+  failedCount: number;
+  /** jobs of the delayed state inspected in this call, and the state's size */
+  scanned: number;
+  total: number;
+  /** pass back as `cursor` to go on; null when the whole state was scanned */
+  nextCursor: string | null;
+}
+
 export const listJobsQuerySchema = z.object({
   state: jobStateSchema.default("waiting"),
   /** BullMQ Pro: restrict to a group's waiting list (state is ignored when set) */
@@ -1563,6 +1598,7 @@ export const AUDIT_ACTIONS = [
   "queue.drain",
   "queue.obliterate",
   "scheduler.remove",
+  "job.promote_matching",
   // BullMQ Pro groups
   "group.pause",
   "group.resume",
@@ -1629,6 +1665,7 @@ export const AUDIT_ACTION_LABEL: Record<AuditAction, string> = {
   "queue.drain": "drained the queue",
   "queue.obliterate": "obliterated the queue",
   "scheduler.remove": "removed a job scheduler",
+  "job.promote_matching": "promoted every matching delayed job",
   "group.pause": "paused a group",
   "group.resume": "resumed a group",
   "group.drain": "drained a group",

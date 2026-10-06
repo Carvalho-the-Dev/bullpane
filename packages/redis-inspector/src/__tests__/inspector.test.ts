@@ -1528,6 +1528,14 @@ describe("writes on BullMQ Pro queues", () => {
       await expect(inspector.obliterateQueue("pro-queue-ops")).rejects.toThrow(/obliterating a BullMQ Pro queue/);
       expect(await queue.getJobCountByTypes("failed")).toBe(1);
     });
+    it("reports a group's delayed jobs as failed instead of taking them out of the group", async () => {
+      const { grouped } = await proQueue("pro-matching-refused");
+      await grouped({ delay: 60_000 });
+      await grouped({ delay: 60_000 });
+      const res = await inspector.promoteMatching("pro-matching-refused", { groupId: "tenant-a" }, { limit: 100 });
+      expect(res).toMatchObject({ matched: 2, promoted: 0, failedCount: 2 });
+      expect(res.failed[0]?.reason).toMatch(/bullmq_pro_api_required/);
+    });
     it("says the group actions need Pro", async () => {
       expect(inspector.bullmqProApi).toBe(false);
       await expect(inspector.pauseGroup("pro-queue-ops", "tenant-a")).rejects.toThrow(/bullmq_pro_api_required: pausing a group/);
@@ -1575,6 +1583,16 @@ describe("writes on BullMQ Pro queues", () => {
       await pro.drainQueue("pro-api-groups", false);
       expect(calls.deleteGroups).toHaveBeenCalledWith("pro-api-groups");
     });
+    it("promotes every delayed job of one group through QueuePro, and only that group's", async () => {
+      const { queue, grouped } = await proQueue("pro-api-matching");
+      const mine = [await grouped({ delay: 60_000 }), await grouped({ delay: 60_000 }), await grouped({ delay: 60_000 })];
+      const plain = (await queue.add("plain", {}, { delay: 60_000 })).id!;
+      const res = await pro.promoteMatching("pro-api-matching", { groupId: "tenant-a" }, { limit: 100 });
+      expect(res).toMatchObject({ matched: 3, promoted: 3, failedCount: 0, nextCursor: null });
+      expect(built).toContain("pro-api-matching");
+      for (const id of mine) expect(await (await queue.getJob(id))!.getState()).not.toBe("delayed");
+      expect(await (await queue.getJob(plain))!.getState()).toBe("delayed");
+    });
     it("keeps core bullmq for a queue that is not Pro", async () => {
       const queue = q("plain-with-pro-api");
       const job = await queue.add("plain", {}, { delay: 60_000 });
@@ -1582,5 +1600,38 @@ describe("writes on BullMQ Pro queues", () => {
       expect(built).not.toContain("plain-with-pro-api");
       expect(await job.getState()).toBe("waiting");
     });
+  });
+});
+
+describe("promoteMatching", () => {
+  it("promotes every delayed job containing the query, not the others", async () => {
+    const queue = q("promote-query");
+    const wanted = [];
+    for (let i = 0; i < 5; i++) wanted.push((await queue.add("send", { campaign: "spring-sale", i }, { delay: 60_000 })).id!);
+    const other = (await queue.add("send", { campaign: "winter" }, { delay: 60_000 })).id!;
+    const res = await inspector.promoteMatching("promote-query", { query: '"campaign":"spring-sale"' }, { limit: 100 });
+    expect(res).toMatchObject({ matched: 5, promoted: 5, failedCount: 0, nextCursor: null, total: 6 });
+    for (const id of wanted) expect(await (await queue.getJob(id))!.getState()).toBe("waiting");
+    expect(await (await queue.getJob(other))!.getState()).toBe("delayed");
+  });
+  it("stops at the limit and continues from the cursor without skipping jobs", async () => {
+    const queue = q("promote-cursor");
+    for (let i = 0; i < 7; i++) await queue.add("send", { tag: "go", i }, { delay: 60_000 + i });
+    for (let i = 0; i < 3; i++) await queue.add("send", { tag: "stay", i }, { delay: 60_000 + i });
+    let cursor: string | null = null;
+    let promoted = 0;
+    let calls = 0;
+    do {
+      const res = await inspector.promoteMatching("promote-cursor", { query: '"tag":"go"' }, { cursor, limit: 3 });
+      expect(res.promoted).toBeLessThanOrEqual(3);
+      promoted += res.promoted;
+      cursor = res.nextCursor;
+      calls++;
+    } while (cursor !== null && calls < 10);
+    expect(promoted).toBe(7);
+    expect(await queue.getDelayedCount()).toBe(3);
+  });
+  it("needs a query or a group", async () => {
+    await expect(inspector.promoteMatching("promote-query", {}, { limit: 10 })).rejects.toThrow(/query_or_group_required/);
   });
 });

@@ -93,6 +93,15 @@ function fakeInspector() {
         : { mode: "ran_copy", jobId: "copy-1", schedulerId: "nightly" };
     }),
     bullmqProApi: true,
+    promoteMatching: vi.fn(async () => ({
+      matched: 3,
+      promoted: 2,
+      failed: [{ jobId: "9", reason: "job_not_found" }],
+      failedCount: 1,
+      scanned: 1000,
+      total: 5000,
+      nextCursor: "998",
+    })),
     getGroups: vi.fn(async () => ({ groups: [], total: 0, byStatus: { waiting: 0, limited: 0, maxed: 0, paused: 0 } })),
     pauseGroup: vi.fn(async () => undefined),
     resumeGroup: vi.fn(async () => undefined),
@@ -345,5 +354,32 @@ describe("BullMQ Pro group actions", () => {
     expect(res.statusCode).toBe(409);
     expect(res.json().message).toMatch(/bullmq_pro_api_required/);
     await w.app.close();
+  });
+});
+
+// Same harness: promote every delayed job of a group / matching a search.
+describe("promote matching", () => {
+  const url = "/api/connections/c1/queues/payments/jobs/promote-matching";
+
+  it("passes the group, query and cursor through and audits counts with the group", async () => {
+    const w = await build("operator");
+    const res = await w.app.inject({ method: "POST", url, payload: { groupId: "tenant-a", query: "spring", cursor: "1000" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ promoted: 2, failedCount: 1, nextCursor: "998" });
+    expect(w.inspector.promoteMatching).toHaveBeenCalledWith("payments", { query: "spring", groupId: "tenant-a" }, { cursor: "1000", limit: expect.any(Number) });
+    await w.app.close();
+    const row = w.db.__audit[0]!;
+    expect(row.action).toBe("job.promote_matching");
+    expect(row.detail).toMatchObject({ groupId: "tenant-a", query: "spring", matched: 3, promoted: 2, failed: 1 });
+  });
+
+  it("refuses a call with neither a query nor a group, and a viewer", async () => {
+    const w = await build("operator");
+    expect((await w.app.inject({ method: "POST", url, payload: { query: "  " } })).statusCode).toBe(400);
+    await w.app.close();
+    const v = await build("viewer");
+    expect((await v.app.inject({ method: "POST", url, payload: { groupId: "tenant-a" } })).statusCode).toBe(403);
+    expect(v.inspector.promoteMatching).not.toHaveBeenCalled();
+    await v.app.close();
   });
 });

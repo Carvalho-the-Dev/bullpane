@@ -18,6 +18,7 @@ import {
   type BulkJobAction,
   type BulkJobActionResult,
   type BulkJobFailure,
+  type PromoteMatchingResult,
   type DiscoveryStatus,
   type GroupsPage,
   type JobDetail,
@@ -927,6 +928,47 @@ export class PgInspector implements Inspector {
       await Promise.all(ids.slice(i, i + BULK_CONCURRENCY).map(run));
     }
     return { action, ok, failed, requested: ids.length };
+  }
+
+  /** See Inspector.promoteMatching. No groups on Postgres, so a group matches nothing. */
+  async promoteMatching(
+    queueName: string,
+    match: { query?: string; groupId?: string },
+    opts: { cursor?: string | null; limit: number },
+  ): Promise<PromoteMatchingResult> {
+    const query = match.query?.trim() ?? "";
+    if (match.groupId !== undefined) return { matched: 0, promoted: 0, failed: [], failedCount: 0, scanned: 0, total: 0, nextCursor: null };
+    if (!query) throw new Error("query_or_group_required");
+    const limit = Math.max(1, opts.limit);
+    const ids: string[] = [];
+    let cursor: string | null = opts.cursor ?? "0";
+    let scanned = 0;
+    let total = 0;
+    let end = Math.max(0, Math.trunc(Number(cursor)) || 0);
+    for (let call = 0; call < 50 && cursor !== null && ids.length < limit; call++) {
+      const page = await this.searchJobs(queueName, "delayed", query, { cursor, limit: limit - ids.length });
+      ids.push(...page.jobs.map((j) => j.id));
+      scanned += page.scanned;
+      total = page.total;
+      end += page.scanned;
+      cursor = page.nextCursor;
+    }
+    let promoted = 0;
+    let failedCount = 0;
+    const failed: BulkJobFailure[] = [];
+    const run = async (jobId: string): Promise<void> => {
+      try {
+        await this.promoteJob(queueName, jobId);
+        promoted++;
+      } catch (err) {
+        failedCount++;
+        if (failed.length < 20) failed.push({ jobId, reason: errorMessage(err) });
+      }
+    };
+    for (let i = 0; i < ids.length; i += BULK_CONCURRENCY) {
+      await Promise.all(ids.slice(i, i + BULK_CONCURRENCY).map(run));
+    }
+    return { matched: ids.length, promoted, failed, failedCount, scanned, total, nextCursor: cursor === null ? null : String(Math.max(0, end - promoted)) };
   }
 
   /** Operator "discard": an active job straight to failed, no retry (see RedisInspector.discardJob). */

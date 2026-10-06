@@ -12,6 +12,9 @@ import {
   listJobsQuerySchema,
   promoteJobSchema,
   type PromoteJobResult,
+  PROMOTE_MATCHING_LIMIT,
+  promoteMatchingSchema,
+  type PromoteMatchingResult,
   searchJobsQuerySchema,
 } from "@bullpane/shared";
 import type { FastifyInstance } from "fastify";
@@ -183,4 +186,33 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
       return result;
     });
   }
+
+  /**
+   * Promote every delayed job of a BullMQ Pro group and / or matching a search, past
+   * the 500-id ceiling: the use case is "run this group (or this campaign) now",
+   * thousands of jobs the operator cannot select by hand. Bounded per call
+   * (PROMOTE_MATCHING_LIMIT promotions, a capped number of scan slices) and
+   * resumable through `cursor`, so the UI loops and shows progress.
+   */
+  app.post<QueueParams>(`${base}/promote-matching`, { preHandler: [operator] }, async (request): Promise<PromoteMatchingResult> => {
+    const input = promoteMatchingSchema.parse(request.body ?? {});
+    const inspector = await app.ctx.connections.getInspector(request.params.id);
+    const result = await withRedis(() =>
+      inspector.promoteMatching(request.params.queue, { query: input.query, groupId: input.groupId }, { cursor: input.cursor ?? null, limit: PROMOTE_MATCHING_LIMIT }),
+    );
+    // The query is the operator's own input, not job data; capped like everything else.
+    request.auditDetail({
+      ...(input.groupId ? { groupId: input.groupId } : {}),
+      ...(input.query?.trim() ? { query: input.query.trim().slice(0, 100) } : {}),
+      matched: result.matched,
+      promoted: result.promoted,
+      failed: result.failedCount,
+      ...(result.failed.length > 0 ? { reasons: result.failed.slice(0, 10).map((f) => `${f.jobId}: ${f.reason}`) } : {}),
+    });
+    request.log.info(
+      { queue: request.params.queue, groupId: input.groupId, matched: result.matched, promoted: result.promoted, failed: result.failedCount, by: request.user?.id },
+      "promoted matching delayed jobs",
+    );
+    return result;
+  });
 }

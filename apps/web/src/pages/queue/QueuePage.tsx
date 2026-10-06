@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowDownUp, BarChart3, Bell, CalendarClock, ChevronDown, Eraser, Flame, Layers, Pause, Play, Plus, RotateCcw, ScrollText, Search, Trash2, Unplug, X } from "lucide-react";
+import { ArrowDownUp, BarChart3, Bell, CalendarClock, ChevronDown, Eraser, FastForward, Flame, Layers, Pause, Play, Plus, RotateCcw, ScrollText, Search, Trash2, Unplug, X } from "lucide-react";
 import { BULK_JOB_LIMIT, GROUP_WAITING_CAP, JOB_STATES, type BulkJobAction, type BulkJobActionResult, type JobState, type JobSummary, type SchedulerPromoteMode } from "@bullpane/shared";
 import { cn } from "@/lib/cn";
 import { routes } from "@/lib/routes";
@@ -33,6 +33,8 @@ import { QueueSetupPanel } from "./QueueSetupPanel";
 import { SchedulersPanel } from "./SchedulersPanel";
 import { QueueAlerts, QueueAlertsPill, useQueueAlerts } from "@/ee/pages/queue/QueueAlerts";
 import { HIDE_HINT, HideIcon, useHideQueue } from "@/components/queues/hideQueue";
+import { GroupToolbar } from "./GroupToolbar";
+import { PromoteMatchingDialog } from "@/components/PromoteMatchingDialog";
 import { GroupCombobox } from "./GroupCombobox";
 import { PauseQueueDialog } from "@/components/queues/PauseQueueDialog";
 import { jobActionMessage } from "@/lib/jobActionMessage";
@@ -155,6 +157,7 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
   const [confirmBulk, setConfirmBulk] = useState<BulkJobAction | null>(null);
   const [confirmRemoveJob, setConfirmRemoveJob] = useState<string | null>(null);
   const [promoteScheduled, setPromoteScheduled] = useState<SchedulerJobRef | null>(null);
+  const [promoteMatchingOpen, setPromoteMatchingOpen] = useState(false);
 
   const [dialog, setDialog] = useState<null | "add" | "clean" | "drain" | "obliterate" | "retryAll" | "pause">(null);
   const [alertOpen, setAlertOpen] = useState(false);
@@ -532,6 +535,8 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
         )}
       </div>
 
+      {isPro && groupId && !searching && !showingPanel && <GroupToolbar connectionId={connectionId} queue={queue} groupId={groupId} />}
+
       {/* Metrics, schedulers, or the job tables */}
       {showingSchedulers ? (
         <SchedulersPanel connectionId={connectionId} queue={queue} />
@@ -565,6 +570,11 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
                 )}
               </span>
               <span className="flex items-center gap-2">
+                {searching && state === "delayed" && isOperator && (
+                  <Button size="sm" variant="secondary" leftIcon={<FastForward />} onClick={() => setPromoteMatchingOpen(true)} title="Promote every delayed job that contains the search, not only the loaded ones">
+                    Promote all matches
+                  </Button>
+                )}
                 {search.hasNextPage && (
                   <Button size="sm" onClick={scanMore} loading={search.isFetchingNextPage}>
                     Scan more
@@ -758,6 +768,9 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
         loading={queueAction.isPending}
         onConfirm={() => runQueueAction({ action: "obliterate" }, `${queue} obliterated`)}
       />
+      {searching && (
+        <PromoteMatchingDialog open={promoteMatchingOpen} onClose={() => setPromoteMatchingOpen(false)} connectionId={connectionId} queue={queue} match={{ query: q.trim() }} />
+      )}
     </Page>
   );
 }
