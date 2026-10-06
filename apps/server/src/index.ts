@@ -2,6 +2,7 @@
  * Process entry point: config → database (SQLite or MySQL: wait + migrate) → app → seed
  * (BULLPANE_CONNECTIONS, demo) → listen → alerts engine. Graceful shutdown on SIGINT/SIGTERM.
  */
+import { loadBullmqPro } from "@bullpane/redis-inspector";
 import { createInspectorPool } from "./services/inspectorPool";
 import { buildApp } from "./app";
 import { loadConfig } from "./config";
@@ -13,9 +14,12 @@ import { seedConnections } from "./seedConnections";
 async function main(): Promise<void> {
   const config = loadConfig(process.env, { warn: (m) => console.warn(`[config] ${m}`) });
   const database = createDatabase(config.database);
+  // Optional and never bundled: see docs/BULLMQ-PRO.md. A broken install stops the boot.
+  const bullmqPro = await loadBullmqPro(config.bullmqProDir ?? undefined);
   const pool = createInspectorPool({
     discoveryTtlMs: config.queueDiscoveryTtl * 1000,
     previewBytes: config.jobPreviewBytes,
+    bullmqPro: bullmqPro?.module ?? null,
   });
 
   const app = await buildApp({ config, db: database.db, pool });
@@ -65,6 +69,11 @@ async function main(): Promise<void> {
       config.database.dialect === "sqlite"
         ? `SQLite ${config.database.path} (single instance; set DATABASE_URL=mysql://… to run more than one)`
         : `MySQL ${redactUrl(config.database.url)}`
+    }`,
+    `  bullmq-pro: ${
+      bullmqPro
+        ? `${bullmqPro.version ?? "installed"} (group actions and group-aware writes on BullMQ Pro queues)`
+        : "not installed (group actions off; writes that would take a job out of its group are refused)"
     }`,
     "",
   ].join("\n");

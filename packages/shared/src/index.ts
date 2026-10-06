@@ -985,6 +985,15 @@ export interface GroupsPage {
 }
 
 /**
+ * GET /groups. `bullmqProApi` says whether BullMQ Pro's own package is installed
+ * next to Bullpane: the group actions (pause, resume, drain) and group-aware
+ * promote / retry / remove need it (docs/BULLMQ-PRO.md).
+ */
+export interface GroupsResponse extends GroupsPage {
+  bullmqProApi: boolean;
+}
+
+/**
  * A BullMQ **job scheduler** (what used to be called a "repeatable job").
  *
  * Schedulers do NOT live in any of the 8 job states: BullMQ keeps them in
@@ -1541,6 +1550,10 @@ export const AUDIT_ACTIONS = [
   "queue.drain",
   "queue.obliterate",
   "scheduler.remove",
+  // BullMQ Pro groups
+  "group.pause",
+  "group.resume",
+  "group.drain",
   "queue.hide",
   "queue.unhide",
   // settings
@@ -1603,6 +1616,9 @@ export const AUDIT_ACTION_LABEL: Record<AuditAction, string> = {
   "queue.drain": "drained the queue",
   "queue.obliterate": "obliterated the queue",
   "scheduler.remove": "removed a job scheduler",
+  "group.pause": "paused a group",
+  "group.resume": "resumed a group",
+  "group.drain": "drained a group",
   "queue.hide": "hid the queue",
   "queue.unhide": "unhid the queue",
   "connection.create": "added a connection",

@@ -92,6 +92,14 @@ function fakeInspector() {
         ? { mode: "skipped_next", schedulerId: "nightly" }
         : { mode: "ran_copy", jobId: "copy-1", schedulerId: "nightly" };
     }),
+    bullmqProApi: true,
+    getGroups: vi.fn(async () => ({ groups: [], total: 0, byStatus: { waiting: 0, limited: 0, maxed: 0, paused: 0 } })),
+    pauseGroup: vi.fn(async () => undefined),
+    resumeGroup: vi.fn(async () => undefined),
+    // "nopro-*" groups stand for an install without BullMQ Pro's package
+    drainGroup: vi.fn(async (_queue: string, groupId: string) => {
+      if (groupId.startsWith("nopro-")) throw new Error("bullmq_pro_api_required: draining a group needs BullMQ Pro's API");
+    }),
     bulkJobAction: vi.fn(async (_queue: string, action: string, jobIds: string[]) => {
       const ok = jobIds.filter((id) => !id.startsWith("ghost"));
       const failed = jobIds.filter((id) => id.startsWith("ghost")).map((jobId) => ({ jobId, reason: "job_not_found" }));
@@ -269,5 +277,49 @@ describe("bulk job actions", () => {
       expect(row.result).toBe("error");
       expect(row.errorMessage).toContain("forbidden");
     });
+  });
+});
+
+// Not bulk either, same harness: BullMQ Pro's group operations.
+describe("BullMQ Pro group actions", () => {
+  const group = (gid: string, action: string) => `/api/connections/c1/queues/payments/groups/${gid}/${action}`;
+
+  it("says on the groups list whether BullMQ Pro's API is installed", async () => {
+    const w = await build("viewer");
+    const res = await w.app.inject({ method: "GET", url: "/api/connections/c1/queues/payments/groups" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().bullmqProApi).toBe(true);
+    await w.app.close();
+  });
+
+  it("pauses and resumes as an operator, audited with the group id", async () => {
+    const w = await build("operator");
+    expect((await w.app.inject({ method: "POST", url: group("tenant-a", "pause") })).statusCode).toBe(200);
+    expect((await w.app.inject({ method: "POST", url: group("tenant-a", "resume") })).statusCode).toBe(200);
+    await w.app.close();
+    expect(w.inspector.pauseGroup).toHaveBeenCalledWith("payments", "tenant-a");
+    expect(w.inspector.resumeGroup).toHaveBeenCalledWith("payments", "tenant-a");
+    expect(w.db.__audit.map((r) => r.action)).toEqual(["group.pause", "group.resume"]);
+    expect(w.db.__audit[0]!.detail).toMatchObject({ groupId: "tenant-a" });
+  });
+
+  it("drains only as an admin, like draining a queue", async () => {
+    const op = await build("operator");
+    expect((await op.app.inject({ method: "POST", url: group("tenant-a", "drain") })).statusCode).toBe(403);
+    expect(op.inspector.drainGroup).not.toHaveBeenCalled();
+    await op.app.close();
+
+    const admin = await build("admin");
+    expect((await admin.app.inject({ method: "POST", url: group("tenant-a", "drain") })).statusCode).toBe(200);
+    await admin.app.close();
+    expect(admin.db.__audit[0]!.action).toBe("group.drain");
+  });
+
+  it("answers 409 with the reason when BullMQ Pro's API is missing", async () => {
+    const w = await build("admin");
+    const res = await w.app.inject({ method: "POST", url: group("nopro-a", "drain") });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).toMatch(/bullmq_pro_api_required/);
+    await w.app.close();
   });
 });

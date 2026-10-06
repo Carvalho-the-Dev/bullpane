@@ -22,6 +22,7 @@ export type {
 } from "@bullpane/inspector";
 
 export { RedisInspector } from "./inspector.js";
+export { loadBullmqPro, type BullmqProModule, type BullmqProQueue, type LoadedBullmqPro } from "./bullmqPro.js";
 export { RedisInspectorPool, createInspectorPool } from "./pool.js";
 
 export {

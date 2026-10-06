@@ -109,6 +109,14 @@ Notes
 | GET | /connections/:id/queues/:queue/setup | viewer | | → `QueueSetup` (meta hash, limiter TTL, workers via CLIENT LIST, group settings; cached 10 s) |
 | GET | /connections/:id/queues/:queue/jobs?groupId= | viewer | | when `groupId` is set the page comes from that Pro group's list and `state` is ignored |
 | GET | /connections/:id/queues/:queue/jobs/search?groupId= | viewer | | only jobs of that Pro group (exact id: the `gid` hash field, else `opts.group.id`); `q` may then be empty. The way to list a group's delayed, failed, completed or active jobs, which Pro keeps in the queue-wide state keys |
+| GET | /connections/:id/queues/:queue/groups | viewer | | → `GroupsResponse` (`GroupsPage` + `bullmqProApi`: BullMQ Pro's package is installed) |
+| POST | /connections/:id/queues/:queue/groups/:groupId/pause | operator | | `QueuePro.pauseGroup` → `{ ok }`; audited `group.pause` |
+| POST | /connections/:id/queues/:queue/groups/:groupId/resume | operator | | `QueuePro.resumeGroup` → `{ ok }`; audited `group.resume` |
+| POST | /connections/:id/queues/:queue/groups/:groupId/drain | admin | | `QueuePro.deleteGroup` (the group's waiting and prioritized jobs) → `{ ok }`; audited `group.drain` |
+
+The three group actions, and job actions that would take a grouped job out of its group,
+answer `409 conflict` with `bullmq_pro_api_required: …` when BullMQ Pro's package is not
+installed next to Bullpane. See docs/BULLMQ-PRO.md for the full list.
 | GET | /connections/:id/overview | viewer | | → `{ info, queues, status, hiddenCount, discovery: DiscoveryStatus }` — `discovery.complete` is false until one full SCAN cycle finished (large keyspaces) |
 
 `JobSummary.dataBytes` is the payload size (HSTRLEN). Payloads above the list cap (32 KiB) are not read:
@@ -439,4 +447,6 @@ Scopes: `queues:read`, `queues:write` (a request for write; the consent screen d
 Tools: `list_connections`, `list_queues`, `get_queue`, `list_jobs`, `search_jobs`,
 `get_job`, `get_job_logs`, `list_schedulers`, `list_groups`, `request_destructive_action`
 (read); `add_job`, `retry_job`, `promote_job`, `remove_job`, `discard_job`,
-`bulk_job_action`, `retry_all`, `pause_queue`, `resume_queue` (write).
+`bulk_job_action`, `retry_all`, `pause_queue`, `resume_queue`, `pause_group`, `resume_group`
+(write). Draining a group is `request_destructive_action` with `drain_group` and `group_id`:
+a link to the group page's confirmation dialog (`?confirm=drain`).

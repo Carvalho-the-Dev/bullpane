@@ -108,6 +108,7 @@ function fakeInspector() {
     ping: vi.fn(async () => ({ ok: true, latencyMs: 1, redisVersion: "7.2.0", error: null })),
     retryJob: vi.fn(async () => undefined),
     removeJob: vi.fn(async () => undefined),
+    pauseGroup: vi.fn(async () => undefined),
     getJob: vi.fn(async (_q: string, id: string) => ({ id, name: "send-invoice", state: "failed", data: { invoice: 42 } })),
     searchJobs: vi.fn(async () => ({ jobs: [], nextCursor: null, scanned: 0, total: 0, skippedLargePayloads: 0 })),
   };
@@ -333,6 +334,20 @@ describe("MCP: who can do what", () => {
     const res = await callTool(w, access_token, "request_destructive_action", { connection_id: "c1", queue: "payments", action: "drain" });
     expect(JSON.parse(res.content[0]!.text).url).toBe(`${PUBLIC_URL}/c/c1/q/payments?confirm=drain`);
     await w.app.close();
+  });
+
+  it("pauses a BullMQ Pro group as a tool, and drains one only through a dashboard link", async () => {
+    const w = await build({ ceiling: "write" });
+    const { access_token } = await connect(w, "admin", "write");
+    const paused = await callTool(w, access_token, "pause_group", { connection_id: "c1", queue: "payments", group_id: "tenant-a" });
+    expect(paused.isError).toBeUndefined();
+    expect(w.inspector.pauseGroup).toHaveBeenCalledWith("payments", "tenant-a");
+    const link = await callTool(w, access_token, "request_destructive_action", { connection_id: "c1", queue: "payments", action: "drain_group", group_id: "tenant-a" });
+    expect(JSON.parse(link.content[0]!.text).url).toBe(`${PUBLIC_URL}/c/c1/q/payments/groups/tenant-a?confirm=drain`);
+    const noGroup = await callTool(w, access_token, "request_destructive_action", { connection_id: "c1", queue: "payments", action: "drain_group" });
+    expect(noGroup.isError).toBe(true);
+    await w.app.close();
+    expect(w.db.__audit.find((r) => r.action === "group.pause")?.detail).toMatchObject({ groupId: "tenant-a", via: "mcp" });
   });
 
   it("reads come back from the same /api route the dashboard uses", async () => {

@@ -597,6 +597,29 @@ against `@taskforcesh/bullmq-pro` 7.48.0. The facts that shape the reader:
 Reads are read-only, one EVALSHA per page (`getGroups.lua`). The simulator writes the same
 layout so the demo shows groups without needing a Pro token.
 
+**Writes on a Pro queue need Pro's own API.** Core bullmq does not know groups: its
+promote and retry put a grouped job in the queue-wide `wait` list, where a Pro worker runs
+it outside its group (no group concurrency or rate limit, even while the group is paused),
+and its remove leaves a waiting job's id in the group's list. Pro ships its own scripts for
+these, and the group operations (`deleteGroup`, `pauseGroup`, `resumeGroup`) only exist
+there. Bullpane cannot bundle Pro (commercial, private registry), so
+`@taskforcesh/bullmq-pro` is an optional package the customer installs next to it
+(`BULLMQ_PRO_DIR`, docs/BULLMQ-PRO.md), loaded once at boot by `loadBullmqPro`:
+
+- **Installed:** `getQueue` hands Pro queues a `QueuePro`, so every existing action
+  (`job.promote()`, `retry()`, `remove()`, `queue.add()`, `obliterate`) runs Pro's scripts
+  without a code path of its own, and drain also calls `deleteGroups`. Non-Pro queues keep
+  core bullmq, because Pro's scripts follow the bullmq version Pro bundles.
+- **Not installed:** writes core bullmq would get wrong on a group throw
+  `bullmq_pro_api_required` (409) with what would have happened. That covers promote or retry
+  of a grouped job, remove of a waiting one, add with `opts.group`, and retry-all, drain or
+  obliterate on a Pro queue. Removing a delayed, completed or failed grouped job stays
+  allowed: those sit in the queue-wide keys.
+
+Deciding costs one HMGET of the job's group fields per job action and, per queue, one HGET of
+`meta.version` plus one EXISTS of the group status zsets, cached 30 s. Both touch keys of a
+single queue.
+
 ## Audit log (Pro)
 
 The differentiator: bull-board has no users at all, so it cannot say who did anything;

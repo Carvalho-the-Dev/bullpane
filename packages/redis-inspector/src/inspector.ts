@@ -31,11 +31,12 @@ import {
   type QueueRates,
   type QueueSetup,
 } from "@bullpane/shared";
+import type { BullmqProModule, BullmqProQueue } from "./bullmqPro.js";
 import { createBullmqConnection, createReadClient } from "./connection.js";
 import {
+  GROUP_ID_FIELDS,
   GROUP_KEY,
   JOB_KEY,
-  GROUP_ID_FIELDS,
   JOB_SUMMARY_FIELDS,
   QUEUE_KEY,
   SCHEDULER_KEY,
@@ -58,6 +59,8 @@ import {
   hashToSummary,
   parseScore,
   metricPoints,
+  parseGroupId,
+  parseOpts,
   parseTreeNode,
   rowToHash,
   rowToScheduler,
@@ -93,7 +96,22 @@ const DEFAULTS: Required<InspectorOptions> = {
   listFieldCapBytes: 32 * 1024,
   searchFieldCapBytes: 256 * 1024,
   searchByteBudget: 8 * 1024 * 1024,
+  bullmqPro: null,
 };
+
+/** How long "is this a BullMQ Pro queue" is trusted before it is read again. */
+const PRO_QUEUE_TTL_MS = 30_000;
+
+/**
+ * A write core bullmq would get wrong on a BullMQ Pro group, without Pro's API to
+ * do it right. A 409 with this code tells the operator what to install.
+ */
+function proApiRequired(what: string, consequence: string): Error {
+  return new Error(
+    `bullmq_pro_api_required: ${what} needs BullMQ Pro's API, which is not installed next to Bullpane ` +
+      `(see docs/BULLMQ-PRO.md). Core bullmq would ${consequence}.`,
+  );
+}
 
 /**
  * SCAN COUNT hint. One SCAN with COUNT 1000 is ~0.3 ms on a 3M-key Redis; with
@@ -158,6 +176,8 @@ export class RedisInspector implements Inspector {
 
   /** bullmq Queue per queue name, created lazily for writes only. */
   private readonly queues = new Map<string, Queue>();
+  private readonly pro: BullmqProModule | null;
+  private readonly proQueues = new Map<string, { pro: boolean; at: number }>();
   /** In cluster mode bullmq gets its own Cluster client, which we own. */
   private bullmqCluster: Cluster | null = null;
   private closed = false;
@@ -171,6 +191,7 @@ export class RedisInspector implements Inspector {
       cluster: config.cluster ?? false,
     };
     this.opts = { ...DEFAULTS, ...stripUndefined(options) };
+    this.pro = (this.opts.bullmqPro as BullmqProModule | null) ?? null;
     this.filter = config.queueFilter ? globToRegExp(config.queueFilter) : null;
     this.client = createReadClient(this.config, this.opts.connectTimeoutMs);
     // Swallow error events: every command already rejects with the same error; an
@@ -1121,15 +1142,57 @@ export class RedisInspector implements Inspector {
   // writes (official bullmq API; we never reimplement its Lua)
   // ---------------------------------------------------------------------------
 
+  get bullmqProApi(): boolean {
+    return this.pro !== null;
+  }
+
+  /**
+   * Is this a BullMQ Pro queue: meta.version says bullmq-pro, or a group status
+   * zset / the metas zset exists (the same signals as queueStats.lua). One HGET and
+   * one EXISTS on keys of this queue, cached PRO_QUEUE_TTL_MS, and only asked
+   * before a write.
+   */
+  private async isProQueue(queueName: string): Promise<boolean> {
+    const cached = this.proQueues.get(queueName);
+    if (cached && Date.now() - cached.at < PRO_QUEUE_TTL_MS) return cached.pro;
+    const c = await this.ensureConnected();
+    const p = queueKeyPrefix(this.config.prefix, queueName);
+    const [version, groupKeys] = await Promise.all([
+      c.hget(p + QUEUE_KEY.meta, "version"),
+      c.exists(p + GROUP_KEY.groups, p + GROUP_KEY.limit, p + GROUP_KEY.max, p + GROUP_KEY.paused, p + GROUP_KEY.metas),
+    ]);
+    const pro = (version ?? "").startsWith("bullmq-pro") || groupKeys > 0;
+    this.proQueues.set(queueName, { pro, at: Date.now() });
+    return pro;
+  }
+
+  /**
+   * The group a job belongs to, from the same fields the reads use (GROUP_ID_FIELDS,
+   * then opts.group.id). One HMGET of a single job hash.
+   */
+  private async jobGroup(queueName: string, jobId: string): Promise<string | null> {
+    const c = await this.ensureConnected();
+    const values = await c.hmget(queueKeyPrefix(this.config.prefix, queueName) + JOB_KEY.hash(jobId), ...GROUP_ID_FIELDS, "opts");
+    const opts = values.pop() ?? null;
+    return parseGroupId(Object.fromEntries(GROUP_ID_FIELDS.map((f, i) => [f, values[i] ?? undefined])), parseOpts({ opts: opts ?? undefined }));
+  }
+
   /**
    * bullmq needs a client it owns. We hand it connection options (or, for cluster,
    * a Cluster instance we own) and cache one Queue per name. `skipMetasUpdate` keeps
    * Queue construction from writing `meta.opts.maxLenEvents` on the customer's queue.
+   *
+   * With BullMQ Pro's API loaded, a Pro queue (or a grouped job's queue) gets a
+   * QueuePro, so job.promote() / retry() / remove() and queue.add() run Pro's
+   * group-aware scripts. Other queues keep core bullmq: Pro's scripts follow its
+   * own bullmq version, not the one the customer's core workers run.
    */
-  private async getQueue(queueName: string): Promise<Queue> {
+  private async getQueue(queueName: string, opts: { grouped?: boolean } = {}): Promise<Queue> {
     // Fail fast on a dead Redis instead of letting bullmq wait for a reconnect.
     await this.ensureConnected();
-    let q = this.queues.get(queueName);
+    const pro = this.pro !== null && (opts.grouped === true || (await this.isProQueue(queueName)));
+    const cacheKey = `${pro ? "pro" : "core"}:${queueName}`;
+    let q = this.queues.get(cacheKey);
     if (q) return q;
     const { connection, ownedCluster } = createBullmqConnection(this.config, this.opts.connectTimeoutMs);
     if (ownedCluster) {
@@ -1140,31 +1203,39 @@ export class RedisInspector implements Inspector {
         this.bullmqCluster = ownedCluster;
       }
     }
-    q = new Queue(queueName, {
-      connection: this.bullmqCluster ?? connection,
-      prefix: this.config.prefix,
-      skipMetasUpdate: true,
-    });
+    const queueOpts = { connection: this.bullmqCluster ?? connection, prefix: this.config.prefix, skipMetasUpdate: true };
+    q = pro && this.pro ? new this.pro.QueuePro(queueName, queueOpts) : new Queue(queueName, queueOpts);
     q.on("error", () => undefined);
-    this.queues.set(queueName, q);
+    this.queues.set(cacheKey, q);
     return q;
   }
 
-  private async getBullJob(queueName: string, jobId: string): Promise<Job> {
-    const queue = await this.getQueue(queueName);
-    const job = await Job.fromId(queue, jobId);
+  /** The QueuePro of a queue, for the group actions that only Pro has. */
+  private async getProQueue(queueName: string, what: string): Promise<BullmqProQueue> {
+    if (!this.pro) throw proApiRequired(what, "not be able to do it at all: group operations only exist in BullMQ Pro");
+    return (await this.getQueue(queueName, { grouped: true })) as BullmqProQueue;
+  }
+
+  /** queue.getJob uses the queue's own Job class, so a QueuePro hands back a JobPro. */
+  private async getBullJob(queueName: string, jobId: string, group: string | null = null): Promise<Job> {
+    const queue = await this.getQueue(queueName, { grouped: group !== null });
+    const job = await queue.getJob(jobId);
     if (!job) throw new Error("job_not_found");
     return job;
   }
 
   async addJob(queueName: string, name: string, data: unknown, opts: Record<string, unknown> = {}): Promise<{ id: string }> {
-    const queue = await this.getQueue(queueName);
+    const grouped = typeof opts.group === "object" && opts.group !== null;
+    if (grouped && !this.pro) throw proApiRequired("adding a job to a group", "ignore opts.group and run the job outside any group");
+    const queue = await this.getQueue(queueName, { grouped });
     const job = await queue.add(name, data, opts as JobsOptions);
     return { id: String(job.id) };
   }
 
   async retryJob(queueName: string, jobId: string): Promise<void> {
-    const job = await this.getBullJob(queueName, jobId);
+    const group = await this.jobGroup(queueName, jobId);
+    if (group !== null && !this.pro) throw proApiRequired(`retrying a job of group ${group}`, "put it back in the queue-wide wait list, outside its group");
+    const job = await this.getBullJob(queueName, jobId, group);
     const state = await job.getState();
     if (state !== "failed" && state !== "completed") {
       throw new Error(`cannot_retry_job_in_state_${state}`);
@@ -1173,12 +1244,28 @@ export class RedisInspector implements Inspector {
   }
 
   async removeJob(queueName: string, jobId: string): Promise<void> {
-    const job = await this.getBullJob(queueName, jobId);
+    const group = await this.jobGroup(queueName, jobId);
+    const job = await this.getBullJob(queueName, jobId, group);
+    if (group !== null && !this.pro) {
+      // Delayed, completed and failed jobs are in the queue-wide keys, which core
+      // bullmq cleans fine. A waiting job is in the group's list ("unknown" to core).
+      const state = await job.getState();
+      if (state !== "delayed" && state !== "completed" && state !== "failed") {
+        throw proApiRequired(`removing a ${state === "unknown" ? "waiting" : state} job of group ${group}`, "delete the job and leave its id in the group's list");
+      }
+    }
     await job.remove();
   }
 
   async promoteJob(queueName: string, jobId: string, scheduler: SchedulerPromoteMode = "run_copy"): Promise<PromoteJobResult> {
-    const job = await this.getBullJob(queueName, jobId);
+    const group = await this.jobGroup(queueName, jobId);
+    if (group !== null && !this.pro) {
+      throw proApiRequired(
+        `promoting a job of group ${group}`,
+        "move it to the queue-wide wait list, where it runs outside its group: no group concurrency or rate limit, even while the group is paused",
+      );
+    }
+    const job = await this.getBullJob(queueName, jobId, group);
     if (!job.repeatJobKey) {
       await job.promote();
       return { mode: "promoted" };
@@ -1272,22 +1359,61 @@ export class RedisInspector implements Inspector {
   }
 
   async retryAll(queueName: string, state: "failed" | "completed"): Promise<void> {
+    if (!this.pro && (await this.isProQueue(queueName))) {
+      throw proApiRequired("retrying every job of a BullMQ Pro queue", "put grouped jobs back in the queue-wide wait list, outside their groups");
+    }
     const queue = await this.getQueue(queueName);
     await queue.retryJobs({ state });
   }
 
+  /**
+   * On a Pro queue the waiting jobs of every group live in the groups' own lists,
+   * which core drain does not touch: QueuePro.deleteGroups empties them too.
+   */
   async drainQueue(queueName: string, includeDelayed: boolean): Promise<void> {
+    const proQueue = await this.isProQueue(queueName);
+    if (proQueue && !this.pro) {
+      throw proApiRequired("draining a BullMQ Pro queue", "leave every group's waiting jobs in place and report the queue drained");
+    }
     const queue = await this.getQueue(queueName);
     await queue.drain(includeDelayed);
+    if (proQueue) await (queue as BullmqProQueue).deleteGroups();
   }
 
   async obliterateQueue(queueName: string): Promise<void> {
+    if (!this.pro && (await this.isProQueue(queueName))) {
+      // QueuePro overrides obliterate; core's does not know the group keys.
+      throw proApiRequired("obliterating a BullMQ Pro queue", "leave the group keys behind");
+    }
     const queue = await this.getQueue(queueName);
     await queue.obliterate({ force: true });
     // the meta key is gone, so the cached discovery result is stale
-    this.queues.delete(queueName);
-    await queue.close().catch(() => undefined);
+    this.proQueues.delete(queueName);
+    for (const key of [`core:${queueName}`, `pro:${queueName}`]) {
+      const cached = this.queues.get(key);
+      this.queues.delete(key);
+      await cached?.close().catch(() => undefined);
+    }
     this.invalidateDiscovery();
+  }
+
+  // ---------------------------------------------------------------------------
+  // BullMQ Pro groups (QueuePro only; see bullmqPro.ts)
+  // ---------------------------------------------------------------------------
+
+  async pauseGroup(queueName: string, groupId: string): Promise<void> {
+    const queue = await this.getProQueue(queueName, "pausing a group");
+    await queue.pauseGroup(groupId);
+  }
+
+  async resumeGroup(queueName: string, groupId: string): Promise<void> {
+    const queue = await this.getProQueue(queueName, "resuming a group");
+    await queue.resumeGroup(groupId);
+  }
+
+  async drainGroup(queueName: string, groupId: string): Promise<void> {
+    const queue = await this.getProQueue(queueName, "draining a group");
+    await queue.deleteGroup(groupId);
   }
 }
 
