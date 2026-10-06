@@ -11,7 +11,7 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
-## [Unreleased]
+## [0.6.1] — 2026-10-06
 
 ### Fixed
 
@@ -24,6 +24,10 @@ written from this file — when you add an entry here, mirror it there
   groups, and the results can be promoted or removed one by one or in bulk.
   The group page links to its delayed, failed and completed jobs, and the MCP
   `search_jobs` tool takes `group_id`. (#9)
+
+  Known issue, fixed in 0.6.2: promoting or retrying a grouped job still goes
+  through core bullmq, which puts it in the queue-wide wait list, outside its
+  group. Upgrade to 0.6.2 before promoting a group's jobs.
 
 ## [0.6.0] — 2026-10-04
 
