@@ -137,6 +137,8 @@ export interface SearchJobsParams {
   state: JobState;
   q: string;
   limit: number;
+  /** BullMQ Pro: only this group's jobs; `q` may then be empty */
+  groupId?: string;
 }
 export interface PageParams {
   page: number;
@@ -405,11 +407,11 @@ export function useJobSearch(
     queryKey: qk.jobSearch(cid ?? "", queue ?? "", params),
     queryFn: ({ pageParam }) =>
       api.get<JobSearchResult>(`${queuePath(cid!, queue!)}/jobs/search`, {
-        query: { state: params.state, q: params.q, limit: params.limit, cursor: pageParam },
+        query: { state: params.state, q: params.q, groupId: params.groupId, limit: params.limit, cursor: pageParam },
       }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    enabled: !!cid && !!queue && params.q.trim().length > 0 && (opts.enabled ?? true),
+    enabled: !!cid && !!queue && (params.q.trim().length > 0 || !!params.groupId) && (opts.enabled ?? true),
     staleTime: 30_000,
   });
 }

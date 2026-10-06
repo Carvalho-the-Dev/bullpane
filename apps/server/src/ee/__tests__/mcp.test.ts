@@ -110,6 +110,7 @@ function fakeInspector() {
     removeJob: vi.fn(async () => undefined),
     pauseGroup: vi.fn(async () => undefined),
     getJob: vi.fn(async (_q: string, id: string) => ({ id, name: "send-invoice", state: "failed", data: { invoice: 42 } })),
+    searchJobs: vi.fn(async () => ({ jobs: [], nextCursor: null, scanned: 0, total: 0, skippedLargePayloads: 0 })),
   };
 }
 
@@ -357,6 +358,18 @@ describe("MCP: who can do what", () => {
     const bad = await callTool(w, access_token, "get_job", { connection_id: "c1" });
     expect(bad.isError).toBe(true);
     expect(bad.content[0]!.text).toMatch(/Invalid arguments/);
+    await w.app.close();
+  });
+
+  it("lists a group's delayed jobs with search_jobs and group_id, no query needed", async () => {
+    const w = await build({ ceiling: "read" });
+    const { access_token } = await connect(w, "viewer", "read");
+    const res = await callTool(w, access_token, "search_jobs", { connection_id: "c1", queue: "payments", group_id: "tenant-a", state: "delayed" });
+    expect(res.isError).toBeUndefined();
+    expect(w.inspector.searchJobs).toHaveBeenCalledWith("payments", "delayed", "", { cursor: null, limit: 50, groupId: "tenant-a" });
+    const neither = await callTool(w, access_token, "search_jobs", { connection_id: "c1", queue: "payments" });
+    expect(neither.isError).toBe(true);
+    expect(neither.content[0]!.text).toMatch(/query or group_id is required/);
     await w.app.close();
   });
 });

@@ -59,7 +59,7 @@ export function GroupsPage() {
             <Badge variant="pro">BullMQ Pro</Badge>
           </span>
         }
-        description={`Groups partition a queue for fairness, with their own concurrency and rate limit. ${summary.data ? `${formatNumber(summary.data.groupsCount)} groups with jobs.` : ""}`}
+        description={`Groups partition a queue for fairness, with their own concurrency and rate limit. ${summary.data ? `${formatNumber(summary.data.groupsCount)} groups with jobs waiting or running.` : ""} A group whose jobs are all delayed is not listed until one becomes due: Pro keeps delayed jobs in the queue's delayed state, not under the group. Filter the queue's Delayed tab by group to see them.`}
       />
 
       {groups.data && <StatusStrip byStatus={groups.data.byStatus} total={groups.data.total} />}
@@ -295,6 +295,17 @@ export function GroupJobsPage() {
           )
         }
       />
+      <p className="mb-3 text-xs text-fg-muted">
+        Pro keeps the group&apos;s delayed, failed and completed jobs in the queue&apos;s own states, not here:{" "}
+        {(["delayed", "failed", "completed"] as const).map((st, i) => (
+          <span key={st}>
+            {i > 0 && " · "}
+            <Link to={routes.queueGroup(connectionId, queue, groupId, st)} className="text-accent hover:underline">
+              {st}
+            </Link>
+          </span>
+        ))}
+      </p>
       {jobs.data && !proApi && <ProApiNotice />}
       <div className="card overflow-hidden">
         <JobsTable connectionId={connectionId} queue={queue} jobs={jobs.data?.jobs} loading={jobs.isLoading} error={jobs.error} canOperate={isOperator} onAction={onAction} pendingId={jobAction.isPending ? jobAction.variables?.jobId : null} emptyText="No jobs waiting in this group" />

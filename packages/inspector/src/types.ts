@@ -59,6 +59,12 @@ export interface InspectorOptions {
   previewBytes?: number;
   /** max jobs one search call inspects before returning a cursor. default 1000 */
   maxScanPerCall?: number;
+  /**
+   * max jobs one group-filtered search call inspects. A job outside the group costs
+   * one HMGET of its group fields and opts, never its payload, so a call can cover
+   * more of the state. default 10000
+   */
+  groupScanPerCall?: number;
   /** ms connect timeout. default 5000 */
   connectTimeoutMs?: number;
   /**
@@ -270,11 +276,16 @@ export interface Inspector {
     state: JobState,
     opts: { start: number; end: number; order: "asc" | "desc" },
   ): Promise<JobsPage>;
+  /**
+   * Bounded, resumable substring search over one state. `groupId` (BullMQ Pro)
+   * keeps only that group's jobs, checked before any payload is read; with it an
+   * empty `query` matches every job of the group.
+   */
   searchJobs(
     queueName: string,
     state: JobState,
     query: string,
-    opts: { cursor?: string | null; limit: number },
+    opts: { cursor?: string | null; limit: number; groupId?: string },
   ): Promise<JobSearchResult>;
   getJob(queueName: string, jobId: string): Promise<JobDetail | null>;
   getJobLogs(queueName: string, jobId: string, opts: { start: number; end: number }): Promise<{ logs: string[]; count: number }>;

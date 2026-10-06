@@ -3,7 +3,20 @@
 <h1>Changelog</h1>
 <p class="updated">Last updated 4 October 2026</p>
 
-<p class="lead-sm">Every version of Bullpane and what it changed for you. Docker images are published per version: <code>bullpane/bullpane:0.6.0</code> (also on <code>ghcr.io/madmorett/bullpane</code>), <code>:0.6</code>, <code>:latest</code>.</p>
+<p class="lead-sm">Every version of Bullpane and what it changed for you. Docker images are published per version: <code>bullpane/bullpane:0.6.1</code> (also on <code>ghcr.io/madmorett/bullpane</code>), <code>:0.6</code>, <code>:latest</code>.</p>
+
+<article class="release">
+  <div class="release-head">
+    <h2 id="v0-6-1">0.6.1</h2>
+    <span class="release-date">6 October 2026</span>
+  </div>
+  <p class="release-note">A BullMQ Pro group's delayed jobs, found.</p>
+  <h3>Fixed</h3>
+  <ul>
+    <li><strong>A BullMQ Pro group's delayed jobs can be found.</strong> Pro keeps only waiting jobs under their group, so the group filter showed nothing on the other tabs and a group with only delayed jobs was not listed. The group filter now works on every tab, a bounded scan that never reads other groups' payloads; the group page links to its delayed, failed and completed jobs, and the MCP <code>search_jobs</code> tool takes <code>group_id</code>. Thanks to João Victor Chagas for the report and Matheus Carvalho for the fix.</li>
+    <li>Known issue, fixed in 0.6.2: promoting or retrying a grouped job still moves it out of its group. Upgrade to 0.6.2 before promoting a group's jobs.</li>
+  </ul>
+</article>
 
 <article class="release">
   <div class="release-head">

@@ -88,6 +88,7 @@ const DEFAULTS: Required<InspectorOptions> = {
   discoveryTtlMs: 30_000,
   previewBytes: 2048,
   maxScanPerCall: 1000,
+  groupScanPerCall: 10_000,
   connectTimeoutMs: 5000,
   maxScanIterations: 2000,
   discoveryScanBudgetMs: 1500,
@@ -679,27 +680,33 @@ export class RedisInspector implements Inspector {
    * are not read at all), plain substring match done in Lua. The cursor is the
    * index of the next job (newest = 0). Measured: 1000 × 1 MB jobs used to hold
    * Redis for 13 s per call; both bounds keep a call in the milliseconds.
+   *
+   * `groupId` filters before any payload is read (one HMGET of the group fields
+   * and opts per job), so a group scan covers groupScanPerCall jobs per call.
    */
   async searchJobs(
     queueName: string,
     state: JobState,
     query: string,
-    opts: { cursor?: string | null; limit: number },
+    opts: { cursor?: string | null; limit: number; groupId?: string },
   ): Promise<JobSearchResult> {
     const c = await this.ensureConnected();
     const cursor = Math.max(0, toInt(opts.cursor ?? "0", 0));
+    const group = opts.groupId ?? "";
     const reply = asArray(
       await callScript(c, "getJobsSearch", [
         stateKey(this.config.prefix, queueName, state),
         STATE_KEY[state].type,
         cursor,
-        this.opts.maxScanPerCall,
+        group ? this.opts.groupScanPerCall : this.opts.maxScanPerCall,
         query.toLowerCase(),
         Math.max(1, opts.limit),
         queueKeyPrefix(this.config.prefix, queueName),
         this.opts.previewBytes,
         this.opts.searchFieldCapBytes,
         this.opts.searchByteBudget,
+        group,
+        GROUP_ID_FIELDS.join(","),
         ...JOB_SUMMARY_FIELDS,
       ]),
     );

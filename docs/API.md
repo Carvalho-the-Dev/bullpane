@@ -108,6 +108,7 @@ Notes
 |---|---|---|---|---|
 | GET | /connections/:id/queues/:queue/setup | viewer | | → `QueueSetup` (meta hash, limiter TTL, workers via CLIENT LIST, group settings; cached 10 s) |
 | GET | /connections/:id/queues/:queue/jobs?groupId= | viewer | | when `groupId` is set the page comes from that Pro group's list and `state` is ignored |
+| GET | /connections/:id/queues/:queue/jobs/search?groupId= | viewer | | only jobs of that Pro group (exact id: the `gid` hash field, else `opts.group.id`); `q` may then be empty. The way to list a group's delayed, failed, completed or active jobs, which Pro keeps in the queue-wide state keys |
 | GET | /connections/:id/queues/:queue/groups | viewer | | → `GroupsResponse` (`GroupsPage` + `bullmqProApi`: BullMQ Pro's package is installed) |
 | POST | /connections/:id/queues/:queue/groups/:groupId/pause | operator | | `QueuePro.pauseGroup` → `{ ok }`; audited `group.pause` |
 | POST | /connections/:id/queues/:queue/groups/:groupId/resume | operator | | `QueuePro.resumeGroup` → `{ ok }`; audited `group.resume` |
@@ -121,6 +122,8 @@ installed next to Bullpane. See docs/BULLMQ-PRO.md for the full list.
 `JobSummary.dataBytes` is the payload size (HSTRLEN). Payloads above the list cap (32 KiB) are not read:
 `dataPreview` is `""` with `dataTruncated: true`. `JobSearchResult.skippedLargePayloads` counts jobs whose
 data was above the search cap (256 KiB) and matched on id / name / error only.
+A search with `groupId` checks the group before reading any payload, so it inspects up to
+`groupScanPerCall` (10 000) jobs per call instead of `maxScanPerCall` (1000).
 
 `QueueSummary.rates` (trailing 60 min completed/failed + successPct) is now included in every
 queues/overview response. It costs two `ZCOUNT`s per queue inside the same stats script.

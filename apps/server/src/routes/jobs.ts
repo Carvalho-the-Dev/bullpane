@@ -77,7 +77,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     const query = searchJobsQuerySchema.parse(request.query);
     const inspector = await app.ctx.connections.getInspector(request.params.id);
     return withRedis(() =>
-      inspector.searchJobs(request.params.queue, query.state, query.q, { cursor: query.cursor ?? null, limit: query.limit }),
+      inspector.searchJobs(request.params.queue, query.state, query.q, { cursor: query.cursor ?? null, limit: query.limit, groupId: query.groupId }),
     );
   });
 

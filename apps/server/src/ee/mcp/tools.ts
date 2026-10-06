@@ -180,22 +180,34 @@ export const MCP_TOOLS: McpTool[] = [
     name: "search_jobs",
     title: "Search jobs",
     description:
-      "Searches the jobs of one state for a text in the job id, name, data or failure reason. Scans in pages: pass next_cursor back as cursor to continue.",
+      "Searches the jobs of one state for a text in the job id, name, data or failure reason. With group_id (BullMQ Pro) only that group's jobs are returned and query may be omitted: this is how to list a group's delayed, failed or completed jobs, which list_groups does not count. Scans in pages: pass next_cursor back as cursor to continue.",
     access: "read",
     inputSchema: object(
       {
         ...QUEUE,
-        query: str("Text to look for"),
+        query: str("Text to look for (optional with group_id)"),
+        group_id: str("BullMQ Pro group id (exact): only jobs of this group"),
         state: str("Job state to search", { enum: [...JOB_STATES], default: "failed" }),
         cursor: str("Cursor from a previous call's nextCursor"),
         limit: int("Max matches", 1, 200),
       },
-      ["connection_id", "queue", "query"],
+      ["connection_id", "queue"],
     ),
     annotations: ro,
-    schema: zQueue.extend({ query: z.string().min(1).max(500), state: zState.optional(), cursor: z.string().optional(), limit: z.number().int().min(1).max(200).optional() }),
+    schema: zQueue
+      .extend({
+        query: z.string().max(500).optional(),
+        group_id: z.string().min(1).max(200).optional(),
+        state: zState.optional(),
+        cursor: z.string().optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+      })
+      .refine((a) => !!a.query || !!a.group_id, { message: "query or group_id is required", path: ["query"] }),
     run: (a, ctx) =>
-      forward(ctx, { method: "GET", url: `${queuePath(a)}/jobs/search${qs({ q: a.query, state: a.state, cursor: a.cursor, limit: a.limit })}` }),
+      forward(ctx, {
+        method: "GET",
+        url: `${queuePath(a)}/jobs/search${qs({ q: a.query || undefined, groupId: a.group_id, state: a.state, cursor: a.cursor, limit: a.limit })}`,
+      }),
   }),
   tool({
     name: "get_job",
@@ -230,7 +242,8 @@ export const MCP_TOOLS: McpTool[] = [
   tool({
     name: "list_groups",
     title: "List groups (BullMQ Pro)",
-    description: "BullMQ Pro groups of a queue: status (rate limited, paused, maxed), waiting and active per group. Empty on plain BullMQ.",
+    description:
+      "BullMQ Pro groups of a queue: status (rate limited, paused, maxed), waiting and active per group. Empty on plain BullMQ. Delayed jobs are not under their group in Pro, so a group with only delayed jobs is not listed: use search_jobs with group_id and state delayed.",
     access: "read",
     inputSchema: object({ ...QUEUE, page: int("Page, from 1", 1, 10_000), page_size: int("Per page", 1, 200) }, ["connection_id", "queue"]),
     annotations: ro,

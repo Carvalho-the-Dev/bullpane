@@ -362,6 +362,59 @@ describe("searchJobs", () => {
   });
 });
 
+describe("searchJobs by BullMQ Pro group", () => {
+  // Pro keeps a group's delayed jobs in the queue-wide delayed zset, marked only by
+  // the group id on the hash (`gid`) or in opts.group.id. Written by hand, no Pro token.
+  const ids: Record<string, string> = {};
+  beforeAll(async () => {
+    const grouped = q("grouped");
+    const add = async (key: string, data: Record<string, unknown>, mark: { gid?: string; optsGroup?: string }) => {
+      const job = await grouped.add("send", data, { delay: 60_000 });
+      ids[key] = job.id!;
+      const hkey = `bull:grouped:${job.id}`;
+      if (mark.gid) await raw.hset(hkey, "gid", mark.gid);
+      if (mark.optsGroup) {
+        const opts = JSON.parse((await raw.hget(hkey, "opts")) ?? "{}");
+        await raw.hset(hkey, "opts", JSON.stringify({ ...opts, group: { id: mark.optsGroup } }));
+      }
+    };
+    await add("byOpts", { to: "a1" }, { optsGroup: "tenant-a" });
+    await add("byOptsNeedle", { to: "needle-a2" }, { optsGroup: "tenant-a" });
+    await add("byGid", { to: "a3" }, { gid: "tenant-a" });
+    await add("otherGroup", { to: "needle-b" }, { optsGroup: "tenant-ab" });
+    await add("gidWins", { to: "c" }, { gid: "tenant-c", optsGroup: "tenant-a" });
+    await add("noGroup", { note: "tenant-a in the data is not a group" }, {});
+  });
+
+  it("lists only the group's delayed jobs, matching the id exactly", async () => {
+    const res = await inspector.searchJobs("grouped", "delayed", "", { limit: 50, groupId: "tenant-a" });
+    expect(res.jobs.map((j) => j.id).sort()).toEqual([ids.byOpts, ids.byOptsNeedle, ids.byGid].sort());
+    expect(res.jobs.every((j) => j.groupId === "tenant-a" && j.state === "delayed")).toBe(true);
+    expect(res.scanned).toBe(6);
+    expect(res.nextCursor).toBeNull();
+  });
+  it("combines the group with a text query", async () => {
+    const res = await inspector.searchJobs("grouped", "delayed", "needle", { limit: 50, groupId: "tenant-a" });
+    expect(res.jobs.map((j) => j.id)).toEqual([ids.byOptsNeedle]);
+  });
+  it("scans groupScanPerCall jobs per call and resumes from the cursor", async () => {
+    const small = new RedisInspector({ id: "g", url: URL }, { groupScanPerCall: 4, maxScanPerCall: 1 });
+    const first = await small.searchJobs("grouped", "delayed", "", { limit: 50, groupId: "tenant-a" });
+    expect(first.scanned).toBe(4);
+    expect(first.nextCursor).toBe("4");
+    const second = await small.searchJobs("grouped", "delayed", "", { limit: 50, groupId: "tenant-a", cursor: first.nextCursor });
+    expect(second.scanned).toBe(2);
+    expect(second.nextCursor).toBeNull();
+    expect(first.jobs.length + second.jobs.length).toBe(3);
+    await small.close();
+  });
+  it("finds nothing for a group with no jobs in that state", async () => {
+    const res = await inspector.searchJobs("grouped", "delayed", "", { limit: 50, groupId: "tenant-z" });
+    expect(res.jobs).toEqual([]);
+    expect(res.nextCursor).toBeNull();
+  });
+});
+
 describe("getJob", () => {
   it("returns parsed detail for a completed job with logs", async () => {
     const page = await inspector.getJobs("emails", "completed", { start: 0, end: 0, order: "asc" });

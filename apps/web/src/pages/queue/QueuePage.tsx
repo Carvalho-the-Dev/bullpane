@@ -46,6 +46,9 @@ type StateTab = JobState | "groups" | "metrics" | "schedulers";
  * Move it into `routes` once both branches have landed.
  */
 
+/** Group scans run up to this many bounded calls on their own before asking for "Scan more". */
+const GROUP_SCAN_ROUND = 10;
+
 function isJobState(s: string | null): s is JobState {
   return !!s && (JOB_STATES as readonly string[]).includes(s);
 }
@@ -94,13 +97,24 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
   const hideQueue = useHideQueue(connectionId);
   const isPro = !!summary.data && (summary.data.isPro || summary.data.groupsCount > 0);
   const searching = q.trim().length > 0;
-  const filteringByGroup = !searching && !!groupId;
+  // BullMQ Pro keeps a group's waiting jobs under the group, but its delayed,
+  // failed, completed and active ones in the queue-wide state keys. Those are
+  // found with the same bounded scan as the search, filtered by group in Lua.
+  const groupScan = !searching && !!groupId && state !== "waiting" && state !== "prioritized";
+  const filteringByGroup = !searching && !!groupId && !groupScan;
+  /** results come from the bounded scan (text search or a group outside waiting) */
+  const scanning = searching || groupScan;
   const showingMetrics = view === "metrics";
   const showingSchedulers = view === "schedulers";
   /** any non-jobs tab: the search box, group filter and job tables are hidden */
   const showingPanel = showingMetrics || showingSchedulers;
-  const jobs = useJobs(connectionId, queue, { state, page, pageSize, order, groupId: filteringByGroup ? groupId : undefined }, { enabled: !searching && !showingPanel });
-  const search = useJobSearch(connectionId, queue, { state, q: q.trim(), limit: 50 }, { enabled: searching && !showingPanel });
+  const jobs = useJobs(connectionId, queue, { state, page, pageSize, order, groupId: filteringByGroup ? groupId : undefined }, { enabled: !scanning && !showingPanel });
+  const search = useJobSearch(
+    connectionId,
+    queue,
+    { state, q: q.trim(), groupId: groupScan ? groupId : undefined, limit: 50 },
+    { enabled: scanning && !showingPanel },
+  );
   const jobAction = useJobAction(connectionId, queue);
   const queueAction = useQueueAction(connectionId, queue);
   const bulkAction = useBulkJobAction(connectionId, queue);
@@ -113,9 +127,23 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
   const scanned = searchPages.reduce((sum, p) => sum + (p.scanned ?? 0), 0);
   const skippedLarge = searchPages.reduce((sum, p) => sum + (p.skippedLargePayloads ?? 0), 0);
   const searchTotal = searchPages.length ? searchPages[searchPages.length - 1].total : (summary.data?.counts?.[state] ?? 0);
+  // A group's jobs can be anywhere in a state of 500k: keep scanning on our own,
+  // one bounded call at a time, until a page of them shows up or a round of
+  // GROUP_SCAN_ROUND calls ends. "Scan more" starts the next round.
+  const [scanRoundStart, setScanRoundStart] = useState(0);
+  useEffect(() => setScanRoundStart(0), [groupId, state]);
+  useEffect(() => {
+    if (!groupScan || !search.hasNextPage || search.isFetching) return;
+    if (searchJobs.length >= 50 || searchPages.length - scanRoundStart >= GROUP_SCAN_ROUND) return;
+    void search.fetchNextPage();
+  }, [groupScan, search, searchJobs.length, searchPages.length, scanRoundStart]);
+  const scanMore = () => {
+    setScanRoundStart(searchPages.length);
+    void search.fetchNextPage();
+  };
 
   /** the jobs actually on screen — these are the ones "select all" acts on */
-  const visibleJobs = searching ? searchJobs : (jobs.data?.jobs ?? []);
+  const visibleJobs = scanning ? searchJobs : (jobs.data?.jobs ?? []);
   const visibleIds = useMemo(() => visibleJobs.map((j) => j.id), [visibleJobs]);
   // Selection by jobId, not by index: the table repolls every 3 s and the rows
   // swap places. See lib/useJobSelection.ts.
@@ -441,7 +469,7 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
 
       {/* State tabs + group filter */}
       <div className="mb-3 flex flex-wrap items-end gap-3 border-b border-border">
-        <div className={cn("min-w-0 flex-1 transition-opacity", !showingPanel && (filteringByGroup || searching) && "opacity-50")} title={filteringByGroup && !showingPanel ? "Clear the group filter to browse by state" : undefined}>
+        <div className={cn("min-w-0 flex-1 transition-opacity", !showingPanel && searching && "opacity-50")}>
           <Tabs<StateTab>
             aria-label="Job state"
             items={tabs}
@@ -451,7 +479,7 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
               else if (v === "metrics") navigate(routes.queueMetrics(connectionId, queue));
               else if (v === "schedulers") navigate(`/c/${encodeURIComponent(connectionId)}/q/${encodeURIComponent(queue)}/schedulers`);
               else if (showingPanel) navigate(routes.queue(connectionId, queue, v));
-              else update({ state: v, page: null, group: null });
+              else update({ state: v, page: null });
             }}
             className="!border-b-0"
             size="sm"
@@ -459,15 +487,15 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
         </div>
         {isPro && !searching && !showingPanel && (
           <div className="flex items-center gap-2 pb-1.5">
-            {filteringByGroup && (
+            {(filteringByGroup || groupScan) && (
               <span className="text-[11px] text-fg-muted">
-                showing group <span className="font-mono text-fg">{groupId}</span>&apos;s waiting jobs
+                showing group <span className="font-mono text-fg">{groupId}</span>&apos;s {groupScan ? state : "waiting"} jobs
               </span>
             )}
             <GroupCombobox connectionId={connectionId} queue={queue} value={groupId} onChange={(gid) => update({ group: gid || null, page: null })} />
           </div>
         )}
-        {!searching && !showingPanel && (
+        {!scanning && !showingPanel && (
           <Button size="sm" variant="ghost" className="mb-1" leftIcon={<ArrowDownUp />} onClick={() => update({ order: order === "desc" ? "asc" : "desc" })} title="Toggle order">
             {order === "desc" ? "Newest first" : "Oldest first"}
           </Button>
@@ -486,16 +514,16 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
         />
       ) : (
       <div className="card overflow-hidden">
-        {searching ? (
+        {scanning ? (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-surface-2/50 px-3 py-2 text-xs" role="status">
               <span className="flex items-center gap-2 text-fg-muted">
                 <Search className="size-3.5 text-fg-subtle" aria-hidden />
                 {search.isFetching && !search.isFetchingNextPage ? (
-                  <Spinner label={`Scanning ${state} jobs for "${q}"…`} />
+                  <Spinner label={searching ? `Scanning ${state} jobs for "${q}"…` : `Scanning ${state} jobs for group ${groupId}…`} />
                 ) : (
                   <>
-                    <span className="num font-semibold text-fg">{formatNumber(searchJobs.length)}</span> {searchJobs.length === 1 ? "match" : "matches"} · scanned <span className="num text-fg">{formatNumber(Math.min(scanned, searchTotal))}</span> of{" "}
+                    <span className="num font-semibold text-fg">{formatNumber(searchJobs.length)}</span> {searching ? (searchJobs.length === 1 ? "match" : "matches") : `${searchJobs.length === 1 ? "job" : "jobs"} of group ${groupId}`} · scanned <span className="num text-fg">{formatNumber(Math.min(scanned, searchTotal))}</span> of{" "}
                     <span className="num text-fg">{formatNumber(searchTotal)}</span> jobs in <span className={STATE_COLORS[state].textClass}>{state}</span>
                     {!search.hasNextPage && search.data && <span className="text-fg-subtle"> · whole state scanned</span>}
                     {skippedLarge > 0 && (
@@ -508,11 +536,11 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
               </span>
               <span className="flex items-center gap-2">
                 {search.hasNextPage && (
-                  <Button size="sm" onClick={() => search.fetchNextPage()} loading={search.isFetchingNextPage}>
+                  <Button size="sm" onClick={scanMore} loading={search.isFetchingNextPage}>
                     Scan more
                   </Button>
                 )}
-                <Button size="sm" variant="ghost" leftIcon={<X />} onClick={clearSearch}>
+                <Button size="sm" variant="ghost" leftIcon={<X />} onClick={searching ? clearSearch : () => update({ group: null, page: null })}>
                   Clear
                 </Button>
               </span>
@@ -524,14 +552,20 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
               The bar says so via `searching` so nobody thinks it took the whole
               queue.
             */}
-            {isOperator && <BulkActionBar selection={selection} state="mixed" queue={queue} actions={availableBulkActions} onRun={onBulk} pending={pendingBulk} searching />}
+            {isOperator && <BulkActionBar selection={selection} state={searching ? "mixed" : state} queue={queue} actions={availableBulkActions} onRun={onBulk} pending={pendingBulk} searching />}
             <JobsTable
               connectionId={connectionId}
               queue={queue}
               jobs={search.data ? searchJobs : undefined}
               loading={search.isLoading}
               error={search.error}
-              emptyText={search.hasNextPage ? "No matches yet — scan more to keep looking" : `No ${state} job contains "${q}"`}
+              emptyText={
+                search.hasNextPage
+                  ? "No matches yet — scan more to keep looking"
+                  : searching
+                    ? `No ${state} job contains "${q}"`
+                    : `No ${state} jobs in group ${groupId}`
+              }
               canOperate={isOperator}
               onAction={onAction}
               pendingId={jobAction.isPending ? jobAction.variables?.jobId : null}
@@ -541,13 +575,13 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
                 clearSearch();
                 update({ group: gid, page: null });
               }}
-              highlight={q}
+              highlight={searching ? q : undefined}
               selection={isOperator ? selection : undefined}
             />
             <div className="flex items-center justify-between border-t border-border px-3 py-2 text-xs text-fg-subtle">
               <span>Each scan reads a bounded slice of the state to keep the database happy.</span>
               {search.hasNextPage && (
-                <Button size="sm" onClick={() => search.fetchNextPage()} loading={search.isFetchingNextPage}>
+                <Button size="sm" onClick={scanMore} loading={search.isFetchingNextPage}>
                   Scan more
                 </Button>
               )}

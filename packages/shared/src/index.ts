@@ -1184,12 +1184,20 @@ export const listJobsQuerySchema = z.object({
   order: z.enum(["asc", "desc"]).default("desc"),
 });
 
-export const searchJobsQuerySchema = z.object({
-  state: jobStateSchema.default("failed"),
-  q: z.string().min(1).max(500),
-  cursor: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
-});
+export const searchJobsQuerySchema = z
+  .object({
+    state: jobStateSchema.default("failed"),
+    q: z.string().max(500).default(""),
+    /**
+     * BullMQ Pro: only jobs of this group (exact id). A delayed, failed or completed
+     * job sits in the queue-wide state key, not under its group, so this is the only
+     * way to list a group's jobs outside `waiting`. With it, `q` may be empty.
+     */
+    groupId: z.string().min(1).max(200).optional(),
+    cursor: z.string().optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+  })
+  .refine((v) => v.q.length > 0 || v.groupId !== undefined, { message: "q or groupId is required", path: ["q"] });
 
 // ---------------------------------------------------------------------------
 // Hidden queues (free)
