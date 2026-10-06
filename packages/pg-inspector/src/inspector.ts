@@ -551,10 +551,11 @@ export class PgInspector implements Inspector {
     queueName: string,
     state: JobState,
     query: string,
-    opts: { cursor?: string | null; limit: number },
+    opts: { cursor?: string | null; limit: number; groupId?: string },
   ): Promise<JobSearchResult> {
     const s = SQL.STATE_SQL[state];
-    if (!s) return { jobs: [], nextCursor: null, scanned: 0, total: 0, skippedLargePayloads: 0 };
+    // The open-source Postgres backend has no groups, so no job belongs to one.
+    if (!s || opts.groupId !== undefined) return { jobs: [], nextCursor: null, scanned: 0, total: 0, skippedLargePayloads: 0 };
     const cursor = Math.max(0, Math.trunc(Number(opts.cursor ?? 0)) || 0);
     const limit = Math.max(1, opts.limit);
     const ob = SQL.orderBy(state, "desc");
