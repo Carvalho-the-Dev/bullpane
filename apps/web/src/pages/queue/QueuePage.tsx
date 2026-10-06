@@ -145,6 +145,8 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
   /** the jobs actually on screen — these are the ones "select all" acts on */
   const visibleJobs = scanning ? searchJobs : (jobs.data?.jobs ?? []);
   const visibleIds = useMemo(() => visibleJobs.map((j) => j.id), [visibleJobs]);
+  /** groups of the jobs on screen: the only way to offer a group whose jobs are all delayed */
+  const pageGroups = useMemo(() => [...new Set(visibleJobs.map((j) => j.groupId).filter((g): g is string => !!g))], [visibleJobs]);
   // Selection by jobId, not by index: the table repolls every 3 s and the rows
   // swap places. See lib/useJobSelection.ts.
   const selection = useJobSelection(visibleIds);
@@ -513,7 +515,14 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
                 showing group <span className="font-mono text-fg">{groupId}</span>&apos;s {groupScan ? state : "waiting"} jobs
               </span>
             )}
-            <GroupCombobox connectionId={connectionId} queue={queue} value={groupId} onChange={(gid) => update({ group: gid || null, page: null })} />
+            <GroupCombobox
+              connectionId={connectionId}
+              queue={queue}
+              value={groupId}
+              onChange={(gid) => update({ group: gid || null, page: null })}
+              showWaiting={state === "waiting" || state === "prioritized"}
+              pageGroups={pageGroups}
+            />
           </div>
         )}
         {!scanning && !showingPanel && (

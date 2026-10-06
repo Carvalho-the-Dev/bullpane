@@ -23,6 +23,11 @@ written from this file — when you add an entry here, mirror it there
   total. An empty wait list on a Pro queue says where the jobs are. The sum
   costs two O(1) commands per group in the existing stats script, on the queue
   page only.
+- **The group filter offers groups whose jobs are all delayed.** Pro only
+  indexes groups with jobs waiting, running, limited or paused, so the picker
+  never listed them, and it showed "N waiting" on every tab. Outside the waiting
+  tab it now lists the groups of the jobs on screen first ("on this page") and
+  hides the waiting counts.
 
 ## [0.6.2] — 2026-10-06
 
