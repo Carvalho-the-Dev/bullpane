@@ -11,7 +11,7 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
-## [Unreleased]
+## [0.6.2] — 2026-10-06
 
 ### Added
 
@@ -37,6 +37,15 @@ written from this file — when you add an entry here, mirror it there
 
   Everything else keeps working, including removing delayed, completed or failed
   grouped jobs.
+
+### Upgrading
+
+- **On BullMQ Pro queues, install BullMQ Pro's package next to Bullpane before
+  upgrading**, or the writes listed above are refused from now on. Bullpane cannot
+  ship it: it is commercial and served from Taskforce's registry with your token.
+  `docs/BULLMQ-PRO.md` has the Docker build (token as a build secret), source and
+  `npx` recipes. The boot banner says `bullmq-pro: <version>` when it is found.
+  Redis queues without groups and Postgres queues are unaffected.
 
 ## [0.6.1] — 2026-10-06
 
