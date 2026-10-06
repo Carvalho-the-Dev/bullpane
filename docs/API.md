@@ -40,7 +40,7 @@ Pro column: the feature that gates the route (402 in free edition).
 | GET | /connections/:id/hidden-queues | viewer | | → `HiddenQueue[]` (queue name, when, who) |
 | POST | /connections/:id/hidden-queues | operator | | `hideQueueSchema` (`{ queueName }`) → `HiddenQueue[]` (201, idempotent) |
 | DELETE | /connections/:id/hidden-queues/:queueName | operator | | → `HiddenQueue[]` (idempotent) |
-| GET | /connections/:id/queues/:queue | viewer | | → `QueueSummary` (with `metrics`) |
+| GET | /connections/:id/queues/:queue | viewer | | → `QueueSummary` (with `metrics`, and on a BullMQ Pro queue with groups `groupWaiting`: jobs waiting inside groups, which `counts.waiting` does not include) |
 | GET | /connections/:id/queues/:queue/jobs | viewer | | `listJobsQuerySchema` → `JobsPage` |
 | GET | /connections/:id/queues/:queue/jobs/search | viewer | | `searchJobsQuerySchema` → `JobSearchResult` |
 | POST | /connections/:id/queues/:queue/jobs | operator | | `AddJobInput` → `{ id }` |

@@ -511,7 +511,7 @@ export class RedisInspector implements Inspector {
    */
   async getQueueStats(
     queueNames: string[],
-    opts: { withMetrics?: boolean; rateWindowMinutes?: number } = {},
+    opts: { withMetrics?: boolean; rateWindowMinutes?: number; groupWaitingCap?: number } = {},
   ): Promise<Record<string, QueueStats>> {
     const out: Record<string, QueueStats> = {};
     if (queueNames.length === 0) return out;
@@ -519,18 +519,19 @@ export class RedisInspector implements Inspector {
     const withMetrics = opts.withMetrics ? 1 : 0;
     const windowMinutes = opts.rateWindowMinutes ?? DEFAULT_RATE_WINDOW_MINUTES;
     const since = Date.now() - windowMinutes * 60_000;
+    const groupCap = Math.max(0, Math.trunc(opts.groupWaitingCap ?? 0));
 
     let replies: Array<LuaReply | null>;
     if (c instanceof Cluster) {
       replies = await Promise.all(
         queueNames.map((q) =>
-          callScript(c, "queueStats", [...this.statsKeys(q), withMetrics, STATS_METRIC_POINTS, since, queueKeyPrefix(this.config.prefix, q)]).catch(() => null),
+          callScript(c, "queueStats", [...this.statsKeys(q), withMetrics, STATS_METRIC_POINTS, since, queueKeyPrefix(this.config.prefix, q), groupCap]).catch(() => null),
         ),
       );
     } else {
       const pipeline = c.pipeline();
       for (const q of queueNames) {
-        pipelineScript(pipeline, "queueStats", [...this.statsKeys(q), withMetrics, STATS_METRIC_POINTS, since, queueKeyPrefix(this.config.prefix, q)]);
+        pipelineScript(pipeline, "queueStats", [...this.statsKeys(q), withMetrics, STATS_METRIC_POINTS, since, queueKeyPrefix(this.config.prefix, q), groupCap]);
       }
       const results = (await pipeline.exec()) ?? [];
       replies = results.map(([err, reply]) => (err ? null : (reply as LuaReply)));
@@ -539,7 +540,7 @@ export class RedisInspector implements Inspector {
     queueNames.forEach((name, i) => {
       const reply = replies[i];
       if (reply === null || reply === undefined) return; // script error for this queue: leave it out
-      out[name] = parseStats(reply, withMetrics === 1, windowMinutes);
+      out[name] = parseStats(reply, withMetrics === 1, windowMinutes, groupCap > 0);
     });
     return out;
   }
@@ -1421,7 +1422,7 @@ export class RedisInspector implements Inspector {
 // helpers
 // ---------------------------------------------------------------------------
 
-function parseStats(reply: LuaReply, withMetrics: boolean, windowMinutes: number): QueueStats {
+function parseStats(reply: LuaReply, withMetrics: boolean, windowMinutes: number, withGroupWaiting = false): QueueStats {
   const r = asArray(reply);
   const counts: QueueCounts = { ...EMPTY_COUNTS };
   STATE_ORDER.forEach((state, i) => {
@@ -1490,6 +1491,9 @@ function parseStats(reply: LuaReply, withMetrics: boolean, windowMinutes: number
   };
   if (withMetrics) {
     stats.metrics = { completed: metricsCompleted, failed: metricsFailed };
+  }
+  if (withGroupWaiting && stats.groupsCount > 0) {
+    stats.groupWaiting = { jobs: asNumber(r[21]), groups: asNumber(r[22]) };
   }
   return stats;
 }

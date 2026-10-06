@@ -11,6 +11,19 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
+## [Unreleased]
+
+### Fixed
+
+- **The waiting count of a BullMQ Pro queue counts the jobs waiting in groups.**
+  Pro keeps a group's waiting jobs in the group's own list, not in the queue's
+  wait list, so a queue with thousands of grouped jobs showed "waiting 0". The
+  waiting tab now adds them, with a tooltip that splits the two and a "+" when
+  the sum stopped at 1000 groups. With a group filter it shows that group's
+  total. An empty wait list on a Pro queue says where the jobs are. The sum
+  costs two O(1) commands per group in the existing stats script, on the queue
+  page only.
+
 ## [0.6.2] — 2026-10-06
 
 ### Added

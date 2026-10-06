@@ -282,6 +282,30 @@ describe("bulk job actions", () => {
 
 // Not bulk either, same harness: BullMQ Pro's group operations.
 describe("BullMQ Pro group actions", () => {
+  it("adds the jobs waiting in groups to the queue summary, saying when the sum stopped at the cap", async () => {
+    const w = await build("viewer");
+    const stats = (groups: number) => ({
+      payments: {
+        counts: { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0, prioritized: 0, paused: 0, "waiting-children": 0 },
+        isPaused: false,
+        isPro: true,
+        groupsCount: 40,
+        groupWaiting: { jobs: 36_391, groups },
+        rates: { windowMinutes: 60, completed: 0, failed: 0, successPct: null, source: "zset", retentionSkewed: false },
+        library: null,
+        schedulersCount: 0,
+        stalledCount: 0,
+      },
+    });
+    w.inspector.getQueueStats.mockResolvedValueOnce(stats(40) as never).mockResolvedValueOnce(stats(10) as never);
+    const full = await w.app.inject({ method: "GET", url: "/api/connections/c1/queues/payments" });
+    expect(full.json().groupWaiting).toEqual({ jobs: 36_391, complete: true });
+    expect(w.inspector.getQueueStats).toHaveBeenCalledWith(["payments"], expect.objectContaining({ groupWaitingCap: expect.any(Number) }));
+    const partial = await w.app.inject({ method: "GET", url: "/api/connections/c1/queues/payments" });
+    expect(partial.json().groupWaiting).toEqual({ jobs: 36_391, complete: false });
+    await w.app.close();
+  });
+
   const group = (gid: string, action: string) => `/api/connections/c1/queues/payments/groups/${gid}/${action}`;
 
   it("says on the groups list whether BullMQ Pro's API is installed", async () => {

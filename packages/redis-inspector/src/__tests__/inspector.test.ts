@@ -576,6 +576,17 @@ describe("BullMQ Pro groups (hand-written keys, bullmq-pro 7.48 layout)", () => 
     expect(tail.total).toBe(3);
     expect(tail.jobs.map((j) => j.id)).toEqual(["3"]);
   });
+  it("sums the jobs waiting in groups, which `wait` does not hold, up to the group cap", async () => {
+    // g1: 2 in its list + 1 prioritized, g4: 1, g3: 1, g2: 0
+    const all = await inspector.getQueueStats(["proq"], { groupWaitingCap: 1000 });
+    expect(all.proq.groupWaiting).toEqual({ jobs: 5, groups: 4 });
+    const capped = await inspector.getQueueStats(["proq"], { groupWaitingCap: 1 });
+    expect(capped.proq.groupWaiting).toEqual({ jobs: 3, groups: 1 });
+    const lists = await inspector.getQueueStats(["proq", "orders"], { withMetrics: true });
+    expect(lists.proq.groupWaiting).toBeUndefined();
+    const plain = await inspector.getQueueStats(["orders"], { groupWaitingCap: 1000 });
+    expect(plain.orders.groupWaiting).toBeUndefined();
+  });
   it("does not mistake `groups:${gid}:meta` hashes for queues", async () => {
     const names = await inspector.discoverQueues();
     expect(names).toContain("proq");

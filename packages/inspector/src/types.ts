@@ -103,6 +103,13 @@ export interface QueueStats {
   /** true when the Pro `groups` zset exists or meta.version starts with "bullmq-pro" */
   isPro: boolean;
   groupsCount: number;
+  /**
+   * BullMQ Pro: jobs waiting in groups, which Pro keeps in each group's list and not
+   * in `wait` (so counts.waiting misses them). Only filled when getQueueStats is
+   * asked with `groupWaitingCap`; `groups` is how many were summed, fewer than
+   * groupsCount means the sum stopped at the cap.
+   */
+  groupWaiting?: { jobs: number; groups: number };
   /** completed / failed inside the trailing window (ZCOUNT, O(log N)) */
   rates: QueueRates;
   /** meta.version, e.g. "bullmq:5.81.4" */
@@ -245,10 +252,14 @@ export interface Inspector {
   discoveryStatus(): Promise<DiscoveryStatus>;
 
   // --- reads (Lua, one round trip / pipelined) ----------------------------
-  /** Counts for many queues in one pipeline of EVALSHA calls. `rateWindowMinutes` defaults to 60. */
+  /**
+   * Counts for many queues in one pipeline of EVALSHA calls. `rateWindowMinutes` defaults to 60.
+   * `groupWaitingCap` (BullMQ Pro) sums the waiting jobs of up to that many groups into
+   * `groupWaiting`; meant for the single-queue page, not for lists of queues.
+   */
   getQueueStats(
     queueNames: string[],
-    opts?: { withMetrics?: boolean; rateWindowMinutes?: number },
+    opts?: { withMetrics?: boolean; rateWindowMinutes?: number; groupWaitingCap?: number },
   ): Promise<Record<string, QueueStats>>;
   /** meta hash + limiter TTL + Pro group settings (one script) + workers via CLIENT LIST. Cached 10 s. */
   getQueueSetup(queueName: string): Promise<QueueSetup>;

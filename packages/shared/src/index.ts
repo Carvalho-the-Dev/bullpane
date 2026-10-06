@@ -775,6 +775,12 @@ export interface QueueRates {
   retentionSkewed: boolean;
 }
 
+/**
+ * Groups whose waiting jobs the single-queue route sums (two O(1) commands each,
+ * in the same script as the counts). Past it the sum is partial and says so.
+ */
+export const GROUP_WAITING_CAP = 1000;
+
 export interface QueueSummary {
   name: string;
   prefix: string;
@@ -783,6 +789,13 @@ export interface QueueSummary {
   /** true when BullMQ Pro group keys exist for this queue or meta.version says bullmq-pro */
   isPro: boolean;
   groupsCount: number;
+  /**
+   * BullMQ Pro: jobs waiting in groups. Pro keeps them in each group's own list,
+   * not in `wait`, so `counts.waiting` does not include them. `complete` is false
+   * when the sum stopped at the per-call group cap (GROUP_WAITING_CAP). Only on the
+   * single-queue route, and only for a queue with groups.
+   */
+  groupWaiting?: { jobs: number; complete: boolean };
   /** job schedulers (repeatable jobs) configured on this queue — ZCARD of `repeat` */
   schedulersCount: number;
   /**

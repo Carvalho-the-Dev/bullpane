@@ -593,6 +593,13 @@ against `@taskforcesh/bullmq-pro` 7.48.0. The facts that shape the reader:
   its group fields and opts and its payload is never read, which is why a group scan inspects
   `groupScanPerCall` (10 000) jobs per call, and the UI chains up to 10 calls before asking
   for "Scan more".
+- Because waiting jobs live under their group, `wait` is empty on a Pro queue whose jobs
+  are all grouped, and the waiting count said 0 with thousands queued. The single-queue
+  route asks queueStats.lua to also sum each group's list and prioritized zset
+  (`QueueSummary.groupWaiting`): two O(1) commands per group, in the same EVALSHA, capped
+  at `GROUP_WAITING_CAP` (1000) groups and flagged `complete: false` past it. Lists of
+  queues (overview, sidebar) do not pay for it. With a group filter the waiting tab shows
+  that group's own total.
 
 Reads are read-only, one EVALSHA per page (`getGroups.lua`). The simulator writes the same
 layout so the demo shows groups without needing a Pro token.
