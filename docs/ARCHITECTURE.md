@@ -660,11 +660,15 @@ against `@taskforcesh/bullmq-pro` 7.48.0. The facts that shape the reader:
 - The groups page lists what Pro indexes, which excludes every group whose jobs are all
   delayed: often exactly the groups an operator wants to act on. The groups table therefore
   has a Delayed column and "delayed only" rows, from `getDelayedGroups.lua`: a bounded slice
-  of `delayed` per call (soonest first), one HMGET of the group fields and opts per job,
+  of `delayed` per call (soonest first, 2500 jobs: measured worst case, every job in its own
+  group, ~6.5 ms of Redis), one HMGET of the group fields and opts per job,
   counts and soonest run per group, and per distinct group one ZSCORE in each of the four
   status zsets, so the scan itself says whether Pro indexes the group (no client-side
-  guess, whatever the number of groups). The UI chains up to 10 calls and sums them (a "+"
-  while part of the state is unscanned). The "delayed only" rows (not indexed) continue the
+  guess, whatever the number of groups). Its cursor is the score and id of the last job
+  read, not an index: due jobs leave `delayed` from the front while the scan runs, and an
+  index would skip one job for each. The UI chains up to 40 calls and sums them (a "+"
+  while part of the state is unscanned), redoes a complete scan every 30 s when it fit in
+  one round, and never shows as "delayed only" a group the polled rows show as indexed. The "delayed only" rows (not indexed) continue the
   indexed groups in one paginated row space: the server pages the indexed part, the page
   fills the rest from the delayed-only list.
 

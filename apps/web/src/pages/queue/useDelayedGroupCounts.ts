@@ -2,8 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import type { GroupStatus } from "@bullpane/shared";
 import { useDelayedGroups } from "@/api/hooks";
 
-/** Scan calls chained on their own (each at most groupScanPerCall jobs) before "scan more". */
-const AUTO_CALLS = 10;
+/**
+ * Scan calls chained on their own before "scan more": 40 × 2500 jobs = 100k per round,
+ * each call a few ms of Redis with the connection free in between.
+ */
+const AUTO_CALLS = 40;
+/**
+ * How often a COMPLETE scan is redone, so a group whose delayed jobs became due (and
+ * that Pro now indexes) stops showing as "delayed only". Only when the whole state
+ * fit in one round of AUTO_CALLS slices: a bigger state is refreshed on "scan more"
+ * or after an action, never on a timer.
+ */
+const REFRESH_MS = 30_000;
 
 export interface DelayedGroupCount {
   delayed: number;
@@ -19,9 +29,12 @@ export interface DelayedGroupCount {
  * is false while part of the state is unscanned: the counts are lower bounds then.
  */
 export function useDelayedGroupCounts(connectionId: string, queue: string, enabled: boolean) {
-  const scan = useDelayedGroups(connectionId, queue, { enabled });
+  const [refresh, setRefresh] = useState(false);
+  const scan = useDelayedGroups(connectionId, queue, { enabled, refetchMs: refresh ? REFRESH_MS : false });
   const [roundStart, setRoundStart] = useState(0);
   const pages = scan.data?.pages ?? [];
+  const smallAndComplete = !!scan.data && !scan.hasNextPage && pages.length <= AUTO_CALLS;
+  useEffect(() => setRefresh(smallAndComplete), [smallAndComplete]);
 
   useEffect(() => {
     if (enabled && scan.hasNextPage && !scan.isFetching && pages.length - roundStart < AUTO_CALLS) void scan.fetchNextPage();

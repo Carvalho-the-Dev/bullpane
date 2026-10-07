@@ -320,10 +320,10 @@ describe("BullMQ Pro group actions", () => {
 
   it("lists the groups that have delayed jobs, resuming from a cursor", async () => {
     const w = await build("viewer");
-    const res = await w.app.inject({ method: "GET", url: "/api/connections/c1/queues/payments/groups-delayed?cursor=10000" });
+    const res = await w.app.inject({ method: "GET", url: "/api/connections/c1/queues/payments/groups-delayed?cursor=7331234567890123:job-42" });
     expect(res.statusCode).toBe(200);
     expect(res.json().groups[0]).toEqual({ id: "tenant-a", delayed: 3, nextRunAt: 1, status: null });
-    expect(w.inspector.getDelayedGroups).toHaveBeenCalledWith("payments", { cursor: "10000" });
+    expect(w.inspector.getDelayedGroups).toHaveBeenCalledWith("payments", { cursor: "7331234567890123:job-42" });
     await w.app.close();
   });
 

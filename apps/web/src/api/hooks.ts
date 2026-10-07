@@ -578,7 +578,7 @@ export function usePromoteMatching(cid: string, queue: string) {
 }
 
 /** Groups with delayed jobs: pages of a bounded scan of `delayed`, continued by cursor. */
-export function useDelayedGroups(cid: string | undefined, queue: string | undefined, opts: { enabled?: boolean } = {}) {
+export function useDelayedGroups(cid: string | undefined, queue: string | undefined, opts: { enabled?: boolean; refetchMs?: number | false } = {}) {
   return useInfiniteQuery({
     queryKey: [...qk.queue(cid ?? "", queue ?? ""), "delayed-groups"] as const,
     queryFn: ({ pageParam }) => api.get<DelayedGroupsPage>(`${queuePath(cid!, queue!)}/groups-delayed`, { query: { cursor: pageParam } }),
@@ -586,6 +586,7 @@ export function useDelayedGroups(cid: string | undefined, queue: string | undefi
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: !!cid && !!queue && (opts.enabled ?? true),
     staleTime: 30_000,
+    refetchInterval: opts.refetchMs ?? false,
   });
 }
 

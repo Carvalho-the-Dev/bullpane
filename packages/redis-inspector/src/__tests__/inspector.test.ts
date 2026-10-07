@@ -1670,16 +1670,34 @@ describe("getDelayedGroups", () => {
     expect(byId["tenant-a"]?.nextRunAt).toBeGreaterThanOrEqual(before + 50_000);
     expect(byId["tenant-a"]?.nextRunAt).toBeLessThan(before + 70_000);
   });
-  it("scans groupScanPerCall jobs per call and resumes from the cursor", async () => {
-    const small = new RedisInspector({ id: "dg", url: URL }, { groupScanPerCall: 3 });
+  it("scans delayedGroupsScanPerCall jobs per call and resumes from the cursor", async () => {
+    const small = new RedisInspector({ id: "dg", url: URL }, { delayedGroupsScanPerCall: 3 });
     const first = await small.getDelayedGroups("delayed-groups", {});
     expect(first.scanned).toBe(3);
-    expect(first.nextCursor).toBe("3");
+    expect(first.nextCursor).toMatch(/^\d+:.+$/);
     const second = await small.getDelayedGroups("delayed-groups", { cursor: first.nextCursor });
     expect(second.scanned).toBe(1);
     expect(second.nextCursor).toBeNull();
     const delayed = [...first.groups, ...second.groups].reduce((n, g) => n + g.delayed, 0);
     expect(delayed + first.ungrouped + second.ungrouped).toBe(4);
+    await small.close();
+  });
+  it("does not skip jobs when the soonest ones leave `delayed` between calls", async () => {
+    const queue = q("delayed-groups-moving");
+    for (let i = 0; i < 6; i++) await queue.add("send", { i }, { delay: 60_000 + i * 1000 });
+    const small = new RedisInspector({ id: "dgm", url: URL }, { delayedGroupsScanPerCall: 2 });
+    const first = await small.getDelayedGroups("delayed-groups-moving", {});
+    // the two soonest become due and a worker takes them: they leave the front of the zset
+    await raw.zpopmin("bull:delayed-groups-moving:delayed", 2);
+    let scanned = first.scanned;
+    let cursor = first.nextCursor;
+    while (cursor !== null) {
+      const page = await small.getDelayedGroups("delayed-groups-moving", { cursor });
+      scanned += page.scanned;
+      cursor = page.nextCursor;
+    }
+    // 2 read before they left + the 4 still delayed: none skipped, none read twice
+    expect(scanned).toBe(6);
     await small.close();
   });
 });

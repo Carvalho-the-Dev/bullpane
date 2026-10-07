@@ -92,6 +92,7 @@ const DEFAULTS: Required<InspectorOptions> = {
   previewBytes: 2048,
   maxScanPerCall: 1000,
   groupScanPerCall: 10_000,
+  delayedGroupsScanPerCall: 2500,
   connectTimeoutMs: 5000,
   maxScanIterations: 2000,
   discoveryScanBudgetMs: 1500,
@@ -974,18 +975,18 @@ export class RedisInspector implements Inspector {
   }
 
   /**
-   * One EVALSHA over a slice of `delayed` (groupScanPerCall jobs, soonest first):
+   * One EVALSHA over a slice of `delayed` (delayedGroupsScanPerCall jobs, soonest first, the
+   * cursor a score so jobs leaving `delayed` meanwhile do not shift it):
    * one HMGET of the group fields + opts per job, never the payload, and the
    * search byte budget on the opts read. See getDelayedGroups.lua.
    */
   async getDelayedGroups(queueName: string, opts: { cursor?: string | null }): Promise<DelayedGroupsPage> {
     const c = await this.ensureConnected();
-    const cursor = Math.max(0, toInt(opts.cursor ?? "0", 0));
     const reply = asArray(
       await callScript(c, "getDelayedGroups", [
         stateKey(this.config.prefix, queueName, "delayed"),
-        cursor,
-        this.opts.groupScanPerCall,
+        opts.cursor ?? "",
+        this.opts.delayedGroupsScanPerCall,
         queueKeyPrefix(this.config.prefix, queueName),
         GROUP_ID_FIELDS.join(","),
         this.opts.searchByteBudget,
@@ -1002,8 +1003,8 @@ export class RedisInspector implements Inspector {
         status: typeof status === "string" && isGroupStatus(status) ? status : null,
       });
     }
-    const next = asNumber(reply[0], -1);
-    return { groups, ungrouped: asNumber(reply[3]), scanned: asNumber(reply[1]), total: asNumber(reply[2]), nextCursor: next < 0 ? null : String(next) };
+    const next = typeof reply[0] === "string" ? reply[0] : "";
+    return { groups, ungrouped: asNumber(reply[3]), scanned: asNumber(reply[1]), total: asNumber(reply[2]), nextCursor: next === "" ? null : next };
   }
 
   // ---------------------------------------------------------------------------

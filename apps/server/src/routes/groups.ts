@@ -30,7 +30,8 @@ export async function groupRoutes(app: FastifyInstance): Promise<void> {
   // Groups with delayed jobs (BullMQ Pro indexes none of them). Not `/groups/delayed`:
   // "delayed" is a valid group id, and its page lives at `/groups/:groupId`.
   app.get<QueueParams>(`${base}-delayed`, { preHandler: [viewer] }, async (request): Promise<DelayedGroupsPage> => {
-    const query = z.object({ cursor: z.string().max(20).optional() }).parse(request.query);
+    // "<score>:<jobId>" of the last job read
+    const query = z.object({ cursor: z.string().max(300).regex(/^[^:]+:.+$/).optional() }).parse(request.query);
     const inspector = await app.ctx.connections.getInspector(request.params.id);
     return withRedis(() => inspector.getDelayedGroups(request.params.queue, { cursor: query.cursor ?? null }));
   });

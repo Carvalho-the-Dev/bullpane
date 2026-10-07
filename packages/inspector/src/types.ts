@@ -67,6 +67,12 @@ export interface InspectorOptions {
    * more of the state. default 10000
    */
   groupScanPerCall?: number;
+  /**
+   * max jobs one "groups with delayed jobs" call inspects. Each job is one HMGET and
+   * each distinct group four ZSCOREs, so the worst case (every job its own group) is
+   * ~2.6 ms of Redis per 1000 jobs, measured. default 2500 (~6.5 ms)
+   */
+  delayedGroupsScanPerCall?: number;
   /** ms connect timeout. default 5000 */
   connectTimeoutMs?: number;
   /**

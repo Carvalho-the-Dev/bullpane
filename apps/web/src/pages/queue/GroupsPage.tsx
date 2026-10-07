@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronLeft, FastForward, Info, Layers, Pause, Play, Trash2 } from "lucide-react";
 import { GROUP_STATUSES, type GroupStatus, type GroupSummary, type GroupsByStatus } from "@bullpane/shared";
@@ -59,13 +59,16 @@ export function GroupsPage() {
    * Groups whose jobs are all delayed: Pro indexes none of them, only the scan sees
    * them, and the scan says per group whether it is indexed (no client-side guess).
    */
+  // The indexed rows are polled; the scan is older. A group on screen as indexed is
+  // indexed now, whatever the scan said when it read it.
+  const onScreen = useMemo(() => new Set(groups.data?.groups.map((g) => g.id) ?? []), [groups.data]);
   const delayedOnly = useMemo(
     () =>
       [...delayed.counts.entries()]
-        .filter(([, c]) => c.status === null)
+        .filter(([id, c]) => c.status === null && !onScreen.has(id))
         .map(([id, c]) => ({ id, ...c }))
         .sort((x, y) => y.delayed - x.delayed),
-    [delayed.counts],
+    [delayed.counts, onScreen],
   );
   // One row space: the indexed groups (paged by the server), then the delayed-only
   // ones (paged here). A page takes the indexed rows the server returned for its
@@ -73,6 +76,11 @@ export function GroupsPage() {
   const indexedTotal = groups.data?.total ?? 0;
   const rangeStart = (page - 1) * pageSize;
   const delayedOnlyPage = delayedOnly.slice(Math.max(0, rangeStart - indexedTotal), Math.max(0, rangeStart + pageSize - indexedTotal));
+  // Promoting or pausing shrinks the list: never leave the operator past its end.
+  const lastPage = Math.max(1, Math.ceil((indexedTotal + delayedOnly.length) / pageSize));
+  useEffect(() => {
+    if (groups.data && !delayed.loading && page > lastPage) setPage(lastPage);
+  }, [groups.data, delayed.loading, page, lastPage]);
 
   const runGroup = (groupId: string, action: GroupActionKind) =>
     groupAction.mutate(
