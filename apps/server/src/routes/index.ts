@@ -11,6 +11,7 @@ import { auditRoutes } from "../ee/routes/audit";
 import { authRoutes } from "./auth";
 import { authSsoRoutes } from "../ee/routes/auth-sso";
 import { connectionRoutes } from "./connections";
+import { flowMapRoutes } from "../ee/routes/flowMaps";
 import { flowRoutes } from "../ee/routes/flows";
 import { folderRoutes } from "../ee/routes/folders";
 import { groupRoutes } from "./groups";
@@ -51,6 +52,7 @@ export async function apiPlugin(app: FastifyInstance): Promise<void> {
   await app.register(jobRoutes);
   await app.register(groupRoutes);
   await app.register(flowRoutes);
+  await app.register(flowMapRoutes);
   await app.register(folderRoutes);
   await app.register(alertRoutes);
   await app.register(userRoutes);

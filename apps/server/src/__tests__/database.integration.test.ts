@@ -445,6 +445,71 @@ describe.each(targets)("$name: the server on a real database", (target) => {
     expect((await call("DELETE", `/flow-edges/${edge.id}`)).statusCode).toBe(404);
   });
 
+  it("flow maps: nesting, cross-connection edges (Redis → Redis → Postgres), layout, copy, delete", async () => {
+    type Map = {
+      id: string;
+      name: string;
+      parentId: string | null;
+      position: number;
+      nodes: Array<{ id: string; connectionId: string; queueName: string; x: number | null; y: number | null; missing: boolean }>;
+      edges: Array<{ id: string; from: string; to: string; source: string; label: string | null }>;
+    };
+    // Nothing listens on port 1: the Postgres side of the map is a missing node, not an error.
+    const pg = await ok<{ id: string }>("POST", "/connections", { name: "Flows PG", kind: "postgres", url: "postgres://app:secret@127.0.0.1:1/app", prefix: "jobs" });
+    const top = await ok<Map>("POST", "/flow-maps", { name: "Dispatch", description: "outbound" });
+    const child = await ok<Map>("POST", "/flow-maps", { name: "WhatsApp", parentId: top.id });
+    const leaf = await ok<Map>("POST", "/flow-maps", { name: "Cloud API", parentId: child.id });
+    const sibling = await ok<Map>("POST", "/flow-maps", { name: "Voice", parentId: top.id });
+    expect([child.position, sibling.position, leaf.position]).toEqual([0, 1, 0]);
+    expect((await call("PATCH", `/flow-maps/${top.id}`, { parentId: leaf.id })).statusCode).toBe(409);
+
+    const ref = (connectionId: string, queueName: string) => ({ connectionId, queueName });
+    const id = (connectionId: string, queueName: string) => `${connectionId}:${queueName}`;
+    await ok("POST", `/flow-maps/${child.id}/edges`, { from: ref(connA, "whatsapp-messenger"), to: ref(connB, "process-batch-whatsapp-cloud-api") });
+    await ok("POST", `/flow-maps/${child.id}/edges`, { from: ref(connB, "process-batch-whatsapp-cloud-api"), to: ref(pg.id, "archive") });
+    // The same queue name on two connections: two nodes, one arrow between them.
+    await ok("POST", `/flow-maps/${child.id}/edges`, { from: ref(connA, "shared"), to: ref(connB, "shared"), label: "mirror" });
+    // Idempotent on the full refs: only the label changes.
+    const drawn = await ok<Map>("POST", `/flow-maps/${child.id}/edges`, { from: ref(connA, "shared"), to: ref(connB, "shared"), label: "copy" });
+    expect(drawn.nodes.map((n) => n.id).sort()).toEqual(
+      [id(connA, "whatsapp-messenger"), id(connB, "process-batch-whatsapp-cloud-api"), id(pg.id, "archive"), id(connA, "shared"), id(connB, "shared")].sort(),
+    );
+    expect(drawn.edges.filter((e) => e.source === "manual")).toHaveLength(3);
+    expect(drawn.edges.find((e) => e.from === id(connA, "shared"))?.label).toBe("copy");
+    expect(drawn.nodes.find((n) => n.connectionId === pg.id)?.missing).toBe(true);
+    expect((await call("POST", `/flow-maps/${child.id}/edges`, { from: ref(connA, "shared"), to: ref(connA, "shared") })).statusCode).toBe(409);
+
+    await ok("PUT", `/flow-maps/${child.id}/layout`, {
+      positions: [
+        { nodeId: id(connA, "whatsapp-messenger"), x: 12.5, y: -40 },
+        { nodeId: id(connB, "ghost"), x: 1, y: 1 },
+      ],
+    });
+    const laid = await ok<Map>("GET", `/flow-maps/${child.id}`);
+    expect(laid.nodes.find((n) => n.id === id(connA, "whatsapp-messenger"))).toMatchObject({ x: 12.5, y: -40 });
+    expect(laid.nodes).toHaveLength(5);
+
+    const copy = await ok<Map>("POST", `/flow-maps/${child.id}/copy`, {});
+    expect(copy).toMatchObject({ name: "WhatsApp (copy)", parentId: null });
+    expect(copy.nodes.find((n) => n.id === id(connA, "whatsapp-messenger"))).toMatchObject({ x: 12.5, y: -40 });
+    expect(copy.edges.filter((e) => e.source === "manual")).toHaveLength(3);
+
+    await ok("DELETE", `/flow-maps/${child.id}`);
+    expect((await ok<Map>("GET", `/flow-maps/${leaf.id}`)).parentId).toBe(top.id);
+    expect(await rows(`SELECT * FROM flow_map_nodes WHERE map_id = '${child.id}'`)).toHaveLength(0);
+    expect(await rows(`SELECT * FROM flow_map_edges WHERE map_id = '${child.id}'`)).toHaveLength(0);
+    const list = await ok<{ maps: Array<{ id: string; kind: string; nodeCount: number; edgeCount: number }> }>("GET", "/flow-maps");
+    expect(list.maps.filter((m) => m.kind === "manual").map((m) => m.id)).toEqual([top.id, copy.id, leaf.id, sibling.id]);
+    expect(list.maps.find((m) => m.id === copy.id)).toMatchObject({ nodeCount: 5, edgeCount: 3 });
+
+    // Removing the Postgres connection takes only its side off the copy.
+    await ok("DELETE", `/connections/${pg.id}`);
+    const after = await ok<Map>("GET", `/flow-maps/${copy.id}`);
+    expect(after.nodes.map((n) => n.id)).not.toContain(id(pg.id, "archive"));
+    expect(after.nodes).toHaveLength(4);
+    expect(after.edges.filter((e) => e.source === "manual")).toHaveLength(2);
+  });
+
   it("sso: provider config is JSON, the secret is encrypted, settings persist", async () => {
     const created = await ok<{ id: string; hasSecret: boolean; enabled: boolean }>("POST", "/sso/providers", {
       kind: "oidc",
@@ -630,10 +695,13 @@ describe.each(targets)("$name: the server on a real database", (target) => {
 
   it("deleting a connection removes everything that pointed at it", async () => {
     await ok("DELETE", `/connections/${connA}`);
-    for (const table of ["folder_queues", "hidden_queues", "alerts", "flow_edges"]) {
+    for (const table of ["folder_queues", "hidden_queues", "alerts", "flow_edges", "flow_map_nodes"]) {
       const left = await rows(`SELECT * FROM ${table} WHERE connection_id = '${connA}'`);
       expect(left, table).toHaveLength(0);
     }
+    expect(await rows(`SELECT * FROM flow_map_edges WHERE from_connection_id = '${connA}' OR to_connection_id = '${connA}'`)).toHaveLength(0);
+    // The other side of the cross-connection map stays.
+    expect((await rows(`SELECT * FROM flow_map_nodes WHERE connection_id = '${connB}'`)).length).toBeGreaterThan(0);
     expect(await rows(`SELECT * FROM folder_queues WHERE connection_id = '${connB}'`)).toHaveLength(1);
     expect((await call("GET", `/connections/${connA}/hidden-queues`)).statusCode).toBe(404);
   });

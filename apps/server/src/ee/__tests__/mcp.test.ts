@@ -56,7 +56,7 @@ function tableName(table: unknown): string {
 }
 
 /** Just enough drizzle for connections, settings and the audit log. */
-function fakeDb() {
+function fakeDb(connectionRows: unknown[] = [CONNECTION]) {
   const audit: AuditLogRow[] = [];
   const settings = new Map<string, string>();
   let lastWhereValue: unknown;
@@ -87,7 +87,7 @@ function fakeDb() {
       limit: () => b,
       then(resolve: (rows: unknown[]) => unknown) {
         let rows: unknown[] = [];
-        if (name === "connections") rows = [CONNECTION];
+        if (name === "connections") rows = connectionRows;
         if (name === "audit_log") rows = audit;
         if (name === "settings") {
           // The settings store only ever selects one key: find it in the condition.
@@ -125,8 +125,8 @@ const PRO: Edition = {
 };
 const FREE: Edition = { ...PRO, tier: "free", features: Object.fromEntries(Object.keys(PRO.features).map((k) => [k, false])) as Edition["features"] };
 
-async function build(opts: { ceiling?: "off" | "read" | "write"; edition?: Edition; readOnly?: boolean } = {}) {
-  const db = fakeDb();
+async function build(opts: { ceiling?: "off" | "read" | "write"; edition?: Edition; readOnly?: boolean; connections?: unknown[] } = {}) {
+  const db = fakeDb(opts.connections);
   if (opts.ceiling) db.__settings.set("mcp.max_access", opts.ceiling);
   const users = new Map<string, UserRow>([
     ["admin", userRow("admin", "admin")],
@@ -382,6 +382,112 @@ describe("MCP: who can do what", () => {
     const neither = await callTool(w, access_token, "search_jobs", { connection_id: "c1", queue: "payments" });
     expect(neither.isError).toBe(true);
     expect(neither.content[0]!.text).toMatch(/query or group_id is required/);
+    await w.app.close();
+  });
+});
+
+describe("MCP: flow map tools", () => {
+  /** The service behind the routes, stubbed: what is asserted is that each tool reaches its route with the right input. */
+  function stubFlowMaps(w: W) {
+    const map = { id: "m1", kind: "manual", name: "Dispatch", nodes: [], edges: [] };
+    const fm = w.app.ctx.flowMaps;
+    return {
+      list: vi.spyOn(fm, "list").mockResolvedValue({ maps: [], detectedComplete: true }),
+      get: vi.spyOn(fm, "get").mockResolvedValue(map as never),
+      create: vi.spyOn(fm, "create").mockResolvedValue(map as never),
+      update: vi.spyOn(fm, "update").mockResolvedValue(map as never),
+      remove: vi.spyOn(fm, "remove").mockResolvedValue(undefined),
+      addNode: vi.spyOn(fm, "addNode").mockResolvedValue(map as never),
+      removeNode: vi.spyOn(fm, "removeNode").mockResolvedValue(map as never),
+      addEdge: vi.spyOn(fm, "addEdge").mockResolvedValue(map as never),
+      removeEdge: vi.spyOn(fm, "removeEdge").mockResolvedValue(map as never),
+      copy: vi.spyOn(fm, "copy").mockResolvedValue(map as never),
+    };
+  }
+
+  it("every tool reaches its route; connection_id defaults to the only connection", async () => {
+    const w = await build({ ceiling: "write" });
+    const fm = stubFlowMaps(w);
+    const { access_token } = await connect(w, "op", "write");
+    const ok = async (name: string, args: Record<string, unknown>) => {
+      const res = await callTool(w, access_token, name, args);
+      expect(res.isError, `${name}: ${res.content[0]?.text}`).toBeUndefined();
+      return res;
+    };
+
+    expect(JSON.parse((await ok("list_flow_maps", {})).content[0]!.text)).toEqual({ maps: [], detectedComplete: true });
+    await ok("get_flow_map", { map_id: "detected:c1:dispatch" });
+    expect(fm.get).toHaveBeenCalledWith("detected:c1:dispatch");
+    await ok("create_flow_map", { name: "Dispatch", parent_id: "p1" });
+    expect(fm.create).toHaveBeenCalledWith({ name: "Dispatch", parentId: "p1" });
+    await ok("update_flow_map", { map_id: "m1", parent_id: null, name: "Outbound" });
+    expect(fm.update).toHaveBeenCalledWith("m1", { name: "Outbound", parentId: null });
+    await ok("delete_flow_map", { map_id: "m1" });
+    expect(fm.remove).toHaveBeenCalledWith("m1");
+    await ok("add_flow_queue", { map_id: "m1", queue: "voice" });
+    expect(fm.addNode).toHaveBeenCalledWith("m1", { connectionId: "c1", queueName: "voice" });
+    // The node id is built from connection + queue, split later on the FIRST ":".
+    await ok("remove_flow_queue", { map_id: "m1", queue: "bull:voice" });
+    expect(fm.removeNode).toHaveBeenCalledWith("m1", "c1:bull:voice");
+    await ok("add_flow_edge", { map_id: "m1", from_queue: "rule-items", to_queue: "sender-trigger", label: "per item" });
+    expect(fm.addEdge).toHaveBeenCalledWith("m1", {
+      from: { connectionId: "c1", queueName: "rule-items" },
+      to: { connectionId: "c1", queueName: "sender-trigger" },
+      label: "per item",
+    });
+    await ok("remove_flow_edge", { map_id: "m1", edge_id: "e1" });
+    expect(fm.removeEdge).toHaveBeenCalledWith("m1", "e1");
+    await ok("copy_flow_map", { map_id: "detected:c1:dispatch", name: "Mine" });
+    expect(fm.copy).toHaveBeenCalledWith("detected:c1:dispatch", { name: "Mine" });
+    await w.app.close();
+  });
+
+  it("drawing needs write access: a read connection lists and reads maps only", async () => {
+    const w = await build({ ceiling: "write" });
+    const fm = stubFlowMaps(w);
+    const { access_token } = await connect(w, "op", "read");
+    const names = await toolNames(w, access_token);
+    expect(names).toEqual(expect.arrayContaining(["list_flow_maps", "get_flow_map"]));
+    for (const write of ["create_flow_map", "update_flow_map", "delete_flow_map", "add_flow_queue", "remove_flow_queue", "add_flow_edge", "remove_flow_edge", "copy_flow_map"]) {
+      expect(names).not.toContain(write);
+    }
+    const res = await callTool(w, access_token, "add_flow_edge", { map_id: "m1", from_queue: "a", to_queue: "b" });
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toMatch(/needs write access/);
+    expect(fm.addEdge).not.toHaveBeenCalled();
+    await w.app.close();
+  });
+
+  it("with several connections an end without a connection is refused, and an edge may cross connections", async () => {
+    const w = await build({ ceiling: "write", connections: [CONNECTION, { ...CONNECTION, id: "c2", name: "ai", position: 1 }] });
+    const fm = stubFlowMaps(w);
+    const { access_token } = await connect(w, "op", "write");
+
+    for (const args of [
+      { map_id: "m1", from_queue: "whatsapp-messenger", to_queue: "process-batch-whatsapp-cloud-api" },
+      { map_id: "m1", from_queue: "whatsapp-messenger", to_queue: "process-batch-whatsapp-cloud-api", from_connection_id: "c1" },
+    ]) {
+      const res = await callTool(w, access_token, "add_flow_edge", args);
+      expect(res.isError).toBe(true);
+      expect(res.content[0]!.text).toMatch(/connection_id is required.*2 connections.*prod \(c1\).*ai \(c2\).*list_connections/);
+    }
+    const queue = await callTool(w, access_token, "add_flow_queue", { map_id: "m1", queue: "voice" });
+    expect(queue.isError).toBe(true);
+    expect(fm.addEdge).not.toHaveBeenCalled();
+    expect(fm.addNode).not.toHaveBeenCalled();
+
+    const res = await callTool(w, access_token, "add_flow_edge", {
+      map_id: "m1",
+      from_queue: "whatsapp-messenger",
+      from_connection_id: "c1",
+      to_queue: "process-batch-whatsapp-cloud-api",
+      to_connection_id: "c2",
+    });
+    expect(res.isError).toBeUndefined();
+    expect(fm.addEdge).toHaveBeenCalledWith("m1", {
+      from: { connectionId: "c1", queueName: "whatsapp-messenger" },
+      to: { connectionId: "c2", queueName: "process-batch-whatsapp-cloud-api" },
+    });
     await w.app.close();
   });
 });

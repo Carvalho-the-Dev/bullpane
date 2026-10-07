@@ -24,6 +24,7 @@ import { EditionService } from "./services/edition";
 import { HttpLicenseClient } from "./services/license-client";
 import { AttentionService } from "./services/attention";
 import { DrizzleSettingsStore } from "./services/settings-store";
+import { FlowMapsService } from "./ee/services/flowMaps";
 import { FlowsService } from "./ee/services/flows";
 import { FoldersService } from "./ee/services/folders";
 import { HealthService } from "./services/health";
@@ -82,6 +83,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   const health = new HealthService(connections);
   connections.onEvict((id) => health.evict(id));
   const flows = new FlowsService(db, connections);
+  const flowMaps = new FlowMapsService(db, connections, flows);
   const alerts = new AlertsService(db, connections, folders);
   const audit = new AuditService(db, app.log);
   const attention = new AttentionService(new DrizzleSettingsStore(db));
@@ -99,6 +101,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
     folders,
     health,
     flows,
+    flowMaps,
     alerts,
     alertsEngine,
     audit,

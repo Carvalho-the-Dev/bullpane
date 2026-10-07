@@ -13,6 +13,7 @@ import type { AttentionService } from "./services/attention";
 import type { AuditService } from "./ee/services/audit";
 import type { ConnectionsService } from "./services/connections";
 import type { EditionService } from "./services/edition";
+import type { FlowMapsService } from "./ee/services/flowMaps";
 import type { FlowsService } from "./ee/services/flows";
 import type { FoldersService } from "./ee/services/folders";
 import type { HealthService } from "./services/health";
@@ -32,6 +33,7 @@ export interface AppContext {
   folders: FoldersService;
   health: HealthService;
   flows: FlowsService;
+  flowMaps: FlowMapsService;
   alerts: AlertsService;
   alertsEngine: AlertsEngine;
   audit: AuditService;
