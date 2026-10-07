@@ -1,7 +1,7 @@
 -- Flow maps (Pro): named diagrams of the queues one process goes through.
 --
 -- WHY NOT THE FOLDERS: a folder says whose a queue is (Payments, Notifications);
--- a flow says where work goes (rule-items → sender-trigger → voice | whatsapp),
+-- a flow says where work goes (checkout → payment-capture → email-send | pick-pack),
 -- and one process crosses several folders. A queue belongs to one folder but
 -- appears in many flows, so a map REFERENCES queues instead of owning them.
 --

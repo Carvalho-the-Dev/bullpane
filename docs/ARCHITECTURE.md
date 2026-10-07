@@ -583,7 +583,7 @@ MySQL. Both kinds render on the same graph, styled differently.
 ## Flow maps (Pro)
 
 A flow map is a named diagram of the queues ONE process goes through
-("Dispatch": rule-items → sender-trigger → voice | whatsapp), drawn in the
+("Checkout": checkout → payment-capture → email-send | pick-pack), drawn in the
 dashboard or by an MCP client (`create_flow_map`, then `add_flow_edge` per hop).
 Contract in API.md "Flow maps"; code in `ee/services/flowMaps.ts`.
 
@@ -597,8 +597,8 @@ the same promise folders make. See `migrations/mysql/0011_flow_maps.sql`.
 
 **A node is connection + queue** (`${connectionId}:${queueName}`; connection ids
 never contain `:`, queue names may, so ids split on the first one). One map may
-cross connections: `whatsapp-messenger` on the events Redis →
-`process-batch-whatsapp-cloud-api` on the AI Redis → `archive` on Postgres. The
+cross connections: `order-placed` on the shop Redis →
+`email-send` on the notifications Redis → `archive` on Postgres. The
 same queue name on two connections is two nodes, and edge idempotency is on the
 full refs. No foreign key to `connections` (queues are discovered strings, not
 rows): `ConnectionsService.remove()` deletes that connection's nodes and every

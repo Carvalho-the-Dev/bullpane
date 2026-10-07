@@ -389,7 +389,7 @@ describe("MCP: who can do what", () => {
 describe("MCP: flow map tools", () => {
   /** The service behind the routes, stubbed: what is asserted is that each tool reaches its route with the right input. */
   function stubFlowMaps(w: W) {
-    const map = { id: "m1", kind: "manual", name: "Dispatch", nodes: [], edges: [] };
+    const map = { id: "m1", kind: "manual", name: "Checkout", nodes: [], edges: [] };
     const fm = w.app.ctx.flowMaps;
     return {
       list: vi.spyOn(fm, "list").mockResolvedValue({ maps: [], detectedComplete: true }),
@@ -418,8 +418,8 @@ describe("MCP: flow map tools", () => {
     expect(JSON.parse((await ok("list_flow_maps", {})).content[0]!.text)).toEqual({ maps: [], detectedComplete: true });
     await ok("get_flow_map", { map_id: "detected:c1:dispatch" });
     expect(fm.get).toHaveBeenCalledWith("detected:c1:dispatch");
-    await ok("create_flow_map", { name: "Dispatch", parent_id: "p1" });
-    expect(fm.create).toHaveBeenCalledWith({ name: "Dispatch", parentId: "p1" });
+    await ok("create_flow_map", { name: "Checkout", parent_id: "p1" });
+    expect(fm.create).toHaveBeenCalledWith({ name: "Checkout", parentId: "p1" });
     await ok("update_flow_map", { map_id: "m1", parent_id: null, name: "Outbound" });
     expect(fm.update).toHaveBeenCalledWith("m1", { name: "Outbound", parentId: null });
     await ok("delete_flow_map", { map_id: "m1" });
@@ -429,10 +429,10 @@ describe("MCP: flow map tools", () => {
     // The node id is built from connection + queue, split later on the FIRST ":".
     await ok("remove_flow_queue", { map_id: "m1", queue: "bull:voice" });
     expect(fm.removeNode).toHaveBeenCalledWith("m1", "c1:bull:voice");
-    await ok("add_flow_edge", { map_id: "m1", from_queue: "rule-items", to_queue: "sender-trigger", label: "per item" });
+    await ok("add_flow_edge", { map_id: "m1", from_queue: "checkout", to_queue: "payment-capture", label: "per item" });
     expect(fm.addEdge).toHaveBeenCalledWith("m1", {
-      from: { connectionId: "c1", queueName: "rule-items" },
-      to: { connectionId: "c1", queueName: "sender-trigger" },
+      from: { connectionId: "c1", queueName: "checkout" },
+      to: { connectionId: "c1", queueName: "payment-capture" },
       label: "per item",
     });
     await ok("remove_flow_edge", { map_id: "m1", edge_id: "e1" });
@@ -464,8 +464,8 @@ describe("MCP: flow map tools", () => {
     const { access_token } = await connect(w, "op", "write");
 
     for (const args of [
-      { map_id: "m1", from_queue: "whatsapp-messenger", to_queue: "process-batch-whatsapp-cloud-api" },
-      { map_id: "m1", from_queue: "whatsapp-messenger", to_queue: "process-batch-whatsapp-cloud-api", from_connection_id: "c1" },
+      { map_id: "m1", from_queue: "order-placed", to_queue: "email-send" },
+      { map_id: "m1", from_queue: "order-placed", to_queue: "email-send", from_connection_id: "c1" },
     ]) {
       const res = await callTool(w, access_token, "add_flow_edge", args);
       expect(res.isError).toBe(true);
@@ -478,15 +478,15 @@ describe("MCP: flow map tools", () => {
 
     const res = await callTool(w, access_token, "add_flow_edge", {
       map_id: "m1",
-      from_queue: "whatsapp-messenger",
+      from_queue: "order-placed",
       from_connection_id: "c1",
-      to_queue: "process-batch-whatsapp-cloud-api",
+      to_queue: "email-send",
       to_connection_id: "c2",
     });
     expect(res.isError).toBeUndefined();
     expect(fm.addEdge).toHaveBeenCalledWith("m1", {
-      from: { connectionId: "c1", queueName: "whatsapp-messenger" },
-      to: { connectionId: "c2", queueName: "process-batch-whatsapp-cloud-api" },
+      from: { connectionId: "c1", queueName: "order-placed" },
+      to: { connectionId: "c2", queueName: "email-send" },
     });
     await w.app.close();
   });

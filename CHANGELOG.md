@@ -11,12 +11,12 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
-## [Unreleased]
+## [0.7.0] — 2026-10-07
 
 ### Added
 
 - **Flow maps (Pro).** Name a process and draw the queues it goes through:
-  "Dispatch" is rule-items → sender-trigger → voice | whatsapp, with live
+  "Checkout" is checkout → payment-capture → email-send | pick-pack, with live
   counts on every queue. A map may cross connections (one Redis to another,
   Redis to Postgres), maps nest like folders, and the positions the team drags
   are saved for everyone. Queues linked by BullMQ's FlowProducer show up as
@@ -27,6 +27,12 @@ written from this file — when you add an entry here, mirror it there
   `remove_flow_queue`, `add_flow_edge`, `remove_flow_edge`, `copy_flow_map`,
   so an AI client can draw a process from your code ("call `add_flow_edge` for
   each hop").
+
+### Upgrading
+
+- One migration runs at boot: three new tables (`flow_maps`, `flow_map_nodes`,
+  `flow_map_edges`), on SQLite and on MySQL. The existing per-connection flow
+  graph and its drawn arrows are unchanged and still listed under "All queues".
 
 ## [0.6.3] — 2026-10-07
 

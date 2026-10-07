@@ -239,7 +239,7 @@ describe("mapConnections", () => {
 
 describe("parseNodeId", () => {
   it("splits on the first colon only (queue names may contain colons)", () => {
-    expect(parseNodeId("events:whatsapp-messenger")).toEqual({ connectionId: "events", queueName: "whatsapp-messenger" });
+    expect(parseNodeId("events:order-placed")).toEqual({ connectionId: "events", queueName: "order-placed" });
     expect(parseNodeId("ai:a:b")).toEqual({ connectionId: "ai", queueName: "a:b" });
     expect(parseNodeId("nocolon")).toBeNull();
   });

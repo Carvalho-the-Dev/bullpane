@@ -1826,7 +1826,7 @@ export const createFlowEdgeSchema = z.object({
 // Flow maps (Pro, feature "flows")
 //
 // A flow map is a named diagram of the queues ONE process goes through
-// ("Dispatch": rule-items → sender-trigger → voice | whatsapp), drawn by a
+// ("Checkout": checkout → payment-capture → email-send | pick-pack), drawn by a
 // person or by an MCP client. Maps nest like folders (optional: a map at the
 // root is fine) but each map has its own diagram; a parent does not merge its
 // children's. A node is "connection + queue", so one map may span several
@@ -1939,7 +1939,7 @@ export type SaveFlowMapLayoutInput = z.infer<typeof saveFlowMapLayoutSchema>;
 
 /**
  * An arrow "work goes from `from` to `to`". Either end not on the map yet is
- * added to it, so one call draws "rule-items → sender-trigger" from scratch.
+ * added to it, so one call draws "checkout → payment-capture" from scratch.
  * Idempotent on (from, to): drawing it again only updates the label.
  */
 export const createFlowMapEdgeSchema = z.object({

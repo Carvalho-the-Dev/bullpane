@@ -3,7 +3,21 @@
 <h1>Changelog</h1>
 <p class="updated">Last updated 4 October 2026</p>
 
-<p class="lead-sm">Every version of Bullpane and what it changed for you. Docker images are published per version: <code>bullpane/bullpane:0.6.3</code> (also on <code>ghcr.io/madmorett/bullpane</code>), <code>:0.6</code>, <code>:latest</code>.</p>
+<p class="lead-sm">Every version of Bullpane and what it changed for you. Docker images are published per version: <code>bullpane/bullpane:0.7.0</code> (also on <code>ghcr.io/madmorett/bullpane</code>), <code>:0.6</code>, <code>:latest</code>.</p>
+
+<article class="release">
+  <div class="release-head">
+    <h2 id="v0-7-0">0.7.0</h2>
+    <span class="release-date">7 October 2026</span>
+  </div>
+  <p class="release-note">Flow maps: draw how work moves through your queues, or let your AI draw it.</p>
+  <h3>Added</h3>
+  <ul>
+    <li><strong>Flow maps (Pro).</strong> Name a process and draw the queues it goes through, for example checkout → payment-capture → email-send and pick-pack, with live counts on every queue. A map can cross connections, from one Redis to another or to Postgres, and each connection gets its own colour. Maps can nest like folders if you want, and the layout the team arranges is saved for everyone.</li>
+    <li><strong>Detected maps.</strong> Queues linked by BullMQ's FlowProducer show up as maps on their own, rooted at the parent queue. Copy one to edit it.</li>
+    <li><strong>Draw them from your AI client.</strong> New MCP tools (<code>create_flow_map</code>, <code>add_flow_edge</code> and more) let Claude or any MCP client read your code and draw the flow, while the page updates live.</li>
+  </ul>
+</article>
 
 <article class="release">
   <div class="release-head">

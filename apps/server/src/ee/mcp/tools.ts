@@ -11,8 +11,8 @@
  * back a link that opens the confirmation dialog in the dashboard, where a human
  * reads the count and the queue name and clicks.
  *
- * Flow map tools let a client DRAW a process ("rule-items → sender-trigger →
- * voice | whatsapp") for the team to see in the dashboard. They are drawings:
+ * Flow map tools let a client DRAW a process ("checkout → payment-capture →
+ * email-send | pick-pack") for the team to see in the dashboard. They are drawings:
  * they never touch Redis, and they need write access like every other change.
  */
 import { flowMapNodeId, JOB_STATES } from "@bullpane/shared";
@@ -455,7 +455,7 @@ export const MCP_TOOLS: McpTool[] = [
       "Creates an empty flow map to draw a process on. Then call add_flow_edge once per hop (work goes from_queue → to_queue): queues not on the map yet are added automatically, so the edges alone draw the whole process. Use add_flow_queue only for a queue with no arrow. parent_id nests it under another map.",
     access: "write",
     inputSchema: object(
-      { name: str("Map name, e.g. the process: Dispatch", { maxLength: 80 }), description: str("What the process does", { maxLength: 500 }), parent_id: str("Manual map to nest it under") },
+      { name: str("Map name, e.g. the process: Checkout", { maxLength: 80 }), description: str("What the process does", { maxLength: 500 }), parent_id: str("Manual map to nest it under") },
       ["name"],
     ),
     annotations: rw(false, false),

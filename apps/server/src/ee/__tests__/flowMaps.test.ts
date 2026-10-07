@@ -181,7 +181,7 @@ describe("flow maps: gates and roles", () => {
   });
 
   it("a viewer reads but cannot write", async () => {
-    const map = await w.ok<FlowMap>("POST", "/flow-maps", { name: "Dispatch" });
+    const map = await w.ok<FlowMap>("POST", "/flow-maps", { name: "Checkout" });
     expect((await w.call("GET", "/flow-maps", { user: "viewer" })).statusCode).toBe(200);
     expect((await w.call("GET", `/flow-maps/${map.id}`, { user: "viewer" })).statusCode).toBe(200);
     for (const [method, url, body] of [
@@ -219,14 +219,14 @@ describe("flow maps: gates and roles", () => {
 describe("flow maps: the tree", () => {
   it("nests maps, places new ones last among their siblings, and lists in tree order", async () => {
     const a = await w.ok<FlowMap>("POST", "/flow-maps", { name: "Billing" });
-    const b = await w.ok<FlowMap>("POST", "/flow-maps", { name: "Dispatch", description: "outbound" });
-    const child1 = await w.ok<FlowMap>("POST", "/flow-maps", { name: "Voice", parentId: b.id });
-    const child2 = await w.ok<FlowMap>("POST", "/flow-maps", { name: "WhatsApp", parentId: b.id });
+    const b = await w.ok<FlowMap>("POST", "/flow-maps", { name: "Checkout", description: "outbound" });
+    const child1 = await w.ok<FlowMap>("POST", "/flow-maps", { name: "Emails", parentId: b.id });
+    const child2 = await w.ok<FlowMap>("POST", "/flow-maps", { name: "Shipping", parentId: b.id });
     expect([a.position, b.position, child1.position, child2.position]).toEqual([0, 1, 0, 1]);
     expect(b).toMatchObject({ kind: "manual", description: "outbound", parentId: null, connectionId: null, nodes: [], edges: [] });
 
     const list = await w.ok<FlowMapsResponse>("GET", "/flow-maps");
-    expect(list.maps.map((m) => m.name)).toEqual(["Billing", "Dispatch", "Voice", "WhatsApp"]);
+    expect(list.maps.map((m) => m.name)).toEqual(["Billing", "Checkout", "Emails", "Shipping"]);
     expect(list.detectedComplete).toBe(true);
 
     expect((await w.call("POST", "/flow-maps", { body: { name: "x", parentId: "nope" } })).statusCode).toBe(404);
@@ -270,16 +270,16 @@ describe("flow maps: the tree", () => {
 
 describe("flow maps: queues and arrows", () => {
   it("an edge adds its missing ends, is idempotent on (from, to) and only updates the label", async () => {
-    const conn = await w.connection("events", { queues: ["rule-items", "sender-trigger"] });
-    const map = await w.ok<FlowMap>("POST", "/flow-maps", { name: "Dispatch" });
-    const from = { connectionId: conn, queueName: "rule-items" };
-    const to = { connectionId: conn, queueName: "sender-trigger" };
+    const conn = await w.connection("events", { queues: ["checkout", "payment-capture"] });
+    const map = await w.ok<FlowMap>("POST", "/flow-maps", { name: "Checkout" });
+    const from = { connectionId: conn, queueName: "checkout" };
+    const to = { connectionId: conn, queueName: "payment-capture" };
 
     const res = await w.call("POST", `/flow-maps/${map.id}/edges`, { body: { from, to, label: "per item" } });
     expect(res.statusCode).toBe(201);
     const drawn = res.json() as FlowMap;
-    expect(drawn.nodes.map((n) => n.id).sort()).toEqual([`${conn}:rule-items`, `${conn}:sender-trigger`]);
-    expect(drawn.edges).toEqual([expect.objectContaining({ from: `${conn}:rule-items`, to: `${conn}:sender-trigger`, source: "manual", label: "per item" })]);
+    expect(drawn.nodes.map((n) => n.id).sort()).toEqual([`${conn}:checkout`, `${conn}:payment-capture`]);
+    expect(drawn.edges).toEqual([expect.objectContaining({ from: `${conn}:checkout`, to: `${conn}:payment-capture`, source: "manual", label: "per item" })]);
 
     const again = await w.ok<FlowMap>("POST", `/flow-maps/${map.id}/edges`, { from, to, label: "each item" });
     expect(again.edges).toHaveLength(1);
@@ -344,16 +344,16 @@ describe("flow maps: queues and arrows", () => {
 
 describe("flow maps: across connections", () => {
   it("draws an arrow from one connection to another (Redis → Redis and Redis → Postgres), with each side's own counts", async () => {
-    const events = await w.connection("events", { queues: ["whatsapp-messenger", "shared"] });
-    const ai = await w.connection("ai", { queues: ["process-batch-whatsapp-cloud-api", "shared"] });
+    const events = await w.connection("events", { queues: ["order-placed", "shared"] });
+    const ai = await w.connection("ai", { queues: ["email-send", "shared"] });
     const pg = await w.connection("jobs-pg", { queues: ["archive"] }, "postgres");
-    const map = await w.ok<FlowMap>("POST", "/flow-maps", { name: "WhatsApp" });
+    const map = await w.ok<FlowMap>("POST", "/flow-maps", { name: "Shipping" });
 
-    const from = { connectionId: events, queueName: "whatsapp-messenger" };
-    const to = { connectionId: ai, queueName: "process-batch-whatsapp-cloud-api" };
+    const from = { connectionId: events, queueName: "order-placed" };
+    const to = { connectionId: ai, queueName: "email-send" };
     let got = await w.ok<FlowMap>("POST", `/flow-maps/${map.id}/edges`, { from, to });
     expect(got.nodes).toHaveLength(2);
-    expect(got.edges).toEqual([expect.objectContaining({ from: `${events}:whatsapp-messenger`, to: `${ai}:process-batch-whatsapp-cloud-api` })]);
+    expect(got.edges).toEqual([expect.objectContaining({ from: `${events}:order-placed`, to: `${ai}:email-send` })]);
     await w.ok("POST", `/flow-maps/${map.id}/edges`, { from: to, to: { connectionId: pg, queueName: "archive" } });
 
     // The same queue NAME on two connections is two nodes, and two arrows.
@@ -362,7 +362,7 @@ describe("flow maps: across connections", () => {
     // ...and idempotency is per full ref: drawing the cross-connection one again adds nothing.
     got = await w.ok<FlowMap>("POST", `/flow-maps/${map.id}/edges`, { from, to, label: "reply" });
     expect(got.nodes.map((n) => n.id).sort()).toEqual(
-      [`${events}:whatsapp-messenger`, `${events}:shared`, `${ai}:process-batch-whatsapp-cloud-api`, `${ai}:shared`, `${pg}:archive`].sort(),
+      [`${events}:order-placed`, `${events}:shared`, `${ai}:email-send`, `${ai}:shared`, `${pg}:archive`].sort(),
     );
     expect(got.edges).toHaveLength(4);
 
@@ -372,17 +372,17 @@ describe("flow maps: across connections", () => {
     expect(w.inspectors.get(events)!.getQueueStats).toHaveBeenCalledTimes(1);
     expect(w.inspectors.get(ai)!.getQueueStats).toHaveBeenCalledTimes(1);
     expect(w.inspectors.get(pg)!.getQueueStats).toHaveBeenCalledTimes(1);
-    expect(w.inspectors.get(events)!.getQueueStats.mock.calls[0]![0].sort()).toEqual(["shared", "whatsapp-messenger"]);
-    expect(w.inspectors.get(ai)!.getQueueStats.mock.calls[0]![0].sort()).toEqual(["process-batch-whatsapp-cloud-api", "shared"]);
-    expect(node(got, events, "whatsapp-messenger")).toMatchObject({ connectionName: "events", counts: { waiting: "whatsapp-messenger".length }, missing: false });
-    expect(node(got, ai, "process-batch-whatsapp-cloud-api")).toMatchObject({ connectionName: "ai", missing: false });
+    expect(w.inspectors.get(events)!.getQueueStats.mock.calls[0]![0].sort()).toEqual(["order-placed", "shared"]);
+    expect(w.inspectors.get(ai)!.getQueueStats.mock.calls[0]![0].sort()).toEqual(["email-send", "shared"]);
+    expect(node(got, events, "order-placed")).toMatchObject({ connectionName: "events", counts: { waiting: "order-placed".length }, missing: false });
+    expect(node(got, ai, "email-send")).toMatchObject({ connectionName: "ai", missing: false });
     expect(node(got, pg, "archive")).toMatchObject({ connectionName: "jobs-pg", missing: false });
 
     // Deleting one connection removes only its side: its nodes and the arrows touching them.
     expect((await w.call("DELETE", `/connections/${ai}`, { user: "admin" })).statusCode).toBe(200);
     got = await w.ok<FlowMap>("GET", `/flow-maps/${map.id}`);
-    expect(got.nodes.map((n) => n.id).sort()).toEqual([`${events}:shared`, `${events}:whatsapp-messenger`, `${pg}:archive`].sort());
-    expect(got.edges).toEqual([expect.objectContaining({ from: `${events}:whatsapp-messenger`, to: `${events}:shared` })]);
+    expect(got.nodes.map((n) => n.id).sort()).toEqual([`${events}:shared`, `${events}:order-placed`, `${pg}:archive`].sort());
+    expect(got.edges).toEqual([expect.objectContaining({ from: `${events}:order-placed`, to: `${events}:shared` })]);
     expect(await w.database.rows(`SELECT * FROM flow_map_nodes WHERE connection_id = '${ai}'`)).toHaveLength(0);
     expect(
       await w.database.rows(`SELECT * FROM flow_map_edges WHERE from_connection_id = '${ai}' OR to_connection_id = '${ai}'`),

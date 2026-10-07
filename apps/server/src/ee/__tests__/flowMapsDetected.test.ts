@@ -57,7 +57,7 @@ beforeAll(async () => {
     data: {},
     children: [
       { name: "voice", queueName: "fm-child-a", data: {} },
-      { name: "whatsapp", queueName: "fm-child-b", data: {} },
+      { name: "email", queueName: "fm-child-b", data: {} },
     ],
   });
   await producer.close();

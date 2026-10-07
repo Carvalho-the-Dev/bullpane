@@ -456,23 +456,23 @@ describe.each(targets)("$name: the server on a real database", (target) => {
     };
     // Nothing listens on port 1: the Postgres side of the map is a missing node, not an error.
     const pg = await ok<{ id: string }>("POST", "/connections", { name: "Flows PG", kind: "postgres", url: "postgres://app:secret@127.0.0.1:1/app", prefix: "jobs" });
-    const top = await ok<Map>("POST", "/flow-maps", { name: "Dispatch", description: "outbound" });
-    const child = await ok<Map>("POST", "/flow-maps", { name: "WhatsApp", parentId: top.id });
+    const top = await ok<Map>("POST", "/flow-maps", { name: "Checkout", description: "outbound" });
+    const child = await ok<Map>("POST", "/flow-maps", { name: "Shipping", parentId: top.id });
     const leaf = await ok<Map>("POST", "/flow-maps", { name: "Cloud API", parentId: child.id });
-    const sibling = await ok<Map>("POST", "/flow-maps", { name: "Voice", parentId: top.id });
+    const sibling = await ok<Map>("POST", "/flow-maps", { name: "Emails", parentId: top.id });
     expect([child.position, sibling.position, leaf.position]).toEqual([0, 1, 0]);
     expect((await call("PATCH", `/flow-maps/${top.id}`, { parentId: leaf.id })).statusCode).toBe(409);
 
     const ref = (connectionId: string, queueName: string) => ({ connectionId, queueName });
     const id = (connectionId: string, queueName: string) => `${connectionId}:${queueName}`;
-    await ok("POST", `/flow-maps/${child.id}/edges`, { from: ref(connA, "whatsapp-messenger"), to: ref(connB, "process-batch-whatsapp-cloud-api") });
-    await ok("POST", `/flow-maps/${child.id}/edges`, { from: ref(connB, "process-batch-whatsapp-cloud-api"), to: ref(pg.id, "archive") });
+    await ok("POST", `/flow-maps/${child.id}/edges`, { from: ref(connA, "order-placed"), to: ref(connB, "email-send") });
+    await ok("POST", `/flow-maps/${child.id}/edges`, { from: ref(connB, "email-send"), to: ref(pg.id, "archive") });
     // The same queue name on two connections: two nodes, one arrow between them.
     await ok("POST", `/flow-maps/${child.id}/edges`, { from: ref(connA, "shared"), to: ref(connB, "shared"), label: "mirror" });
     // Idempotent on the full refs: only the label changes.
     const drawn = await ok<Map>("POST", `/flow-maps/${child.id}/edges`, { from: ref(connA, "shared"), to: ref(connB, "shared"), label: "copy" });
     expect(drawn.nodes.map((n) => n.id).sort()).toEqual(
-      [id(connA, "whatsapp-messenger"), id(connB, "process-batch-whatsapp-cloud-api"), id(pg.id, "archive"), id(connA, "shared"), id(connB, "shared")].sort(),
+      [id(connA, "order-placed"), id(connB, "email-send"), id(pg.id, "archive"), id(connA, "shared"), id(connB, "shared")].sort(),
     );
     expect(drawn.edges.filter((e) => e.source === "manual")).toHaveLength(3);
     expect(drawn.edges.find((e) => e.from === id(connA, "shared"))?.label).toBe("copy");
@@ -481,17 +481,17 @@ describe.each(targets)("$name: the server on a real database", (target) => {
 
     await ok("PUT", `/flow-maps/${child.id}/layout`, {
       positions: [
-        { nodeId: id(connA, "whatsapp-messenger"), x: 12.5, y: -40 },
+        { nodeId: id(connA, "order-placed"), x: 12.5, y: -40 },
         { nodeId: id(connB, "ghost"), x: 1, y: 1 },
       ],
     });
     const laid = await ok<Map>("GET", `/flow-maps/${child.id}`);
-    expect(laid.nodes.find((n) => n.id === id(connA, "whatsapp-messenger"))).toMatchObject({ x: 12.5, y: -40 });
+    expect(laid.nodes.find((n) => n.id === id(connA, "order-placed"))).toMatchObject({ x: 12.5, y: -40 });
     expect(laid.nodes).toHaveLength(5);
 
     const copy = await ok<Map>("POST", `/flow-maps/${child.id}/copy`, {});
-    expect(copy).toMatchObject({ name: "WhatsApp (copy)", parentId: null });
-    expect(copy.nodes.find((n) => n.id === id(connA, "whatsapp-messenger"))).toMatchObject({ x: 12.5, y: -40 });
+    expect(copy).toMatchObject({ name: "Shipping (copy)", parentId: null });
+    expect(copy.nodes.find((n) => n.id === id(connA, "order-placed"))).toMatchObject({ x: 12.5, y: -40 });
     expect(copy.edges.filter((e) => e.source === "manual")).toHaveLength(3);
 
     await ok("DELETE", `/flow-maps/${child.id}`);

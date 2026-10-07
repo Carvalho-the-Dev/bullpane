@@ -80,7 +80,7 @@ export function NewMapDialog({
           submit();
         }}
       >
-        <Input label="Name" autoFocus value={name} onChange={(e) => (setName(e.target.value), setError(null))} error={error} maxLength={80} placeholder="e.g. WhatsApp dispatch" />
+        <Input label="Name" autoFocus value={name} onChange={(e) => (setName(e.target.value), setError(null))} error={error} maxLength={80} placeholder="e.g. Order checkout" />
         <Textarea label="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} rows={2} placeholder="What the process does, who owns it" />
         {parents.length > 1 && (
           <Select
