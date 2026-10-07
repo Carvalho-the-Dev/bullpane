@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { GroupStatus } from "@bullpane/shared";
 import { useDelayedGroups } from "@/api/hooks";
 
 /** Scan calls chained on their own (each at most groupScanPerCall jobs) before "scan more". */
@@ -7,6 +8,8 @@ const AUTO_CALLS = 10;
 export interface DelayedGroupCount {
   delayed: number;
   nextRunAt: number;
+  /** place in Pro's index as of the latest slice that saw the group; null = not indexed */
+  status: GroupStatus | null;
 }
 
 /**
@@ -32,7 +35,8 @@ export function useDelayedGroupCounts(connectionId: string, queue: string, enabl
         if (seen) {
           seen.delayed += g.delayed;
           seen.nextRunAt = Math.min(seen.nextRunAt, g.nextRunAt);
-        } else byId.set(g.id, { delayed: g.delayed, nextRunAt: g.nextRunAt });
+          seen.status = g.status;
+        } else byId.set(g.id, { delayed: g.delayed, nextRunAt: g.nextRunAt, status: g.status });
       }
     }
     return byId;

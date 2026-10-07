@@ -93,7 +93,7 @@ function fakeInspector() {
         : { mode: "ran_copy", jobId: "copy-1", schedulerId: "nightly" };
     }),
     bullmqProApi: true,
-    getDelayedGroups: vi.fn(async () => ({ groups: [{ id: "tenant-a", delayed: 3, nextRunAt: 1 }], ungrouped: 0, scanned: 3, total: 3, nextCursor: null })),
+    getDelayedGroups: vi.fn(async () => ({ groups: [{ id: "tenant-a", delayed: 3, nextRunAt: 1, status: null }], ungrouped: 0, scanned: 3, total: 3, nextCursor: null })),
     promoteMatching: vi.fn(async () => ({
       matched: 3,
       promoted: 2,
@@ -322,7 +322,7 @@ describe("BullMQ Pro group actions", () => {
     const w = await build("viewer");
     const res = await w.app.inject({ method: "GET", url: "/api/connections/c1/queues/payments/groups-delayed?cursor=10000" });
     expect(res.statusCode).toBe(200);
-    expect(res.json().groups[0]).toEqual({ id: "tenant-a", delayed: 3, nextRunAt: 1 });
+    expect(res.json().groups[0]).toEqual({ id: "tenant-a", delayed: 3, nextRunAt: 1, status: null });
     expect(w.inspector.getDelayedGroups).toHaveBeenCalledWith("payments", { cursor: "10000" });
     await w.app.close();
   });

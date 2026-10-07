@@ -993,11 +993,13 @@ export class RedisInspector implements Inspector {
     );
     const rows = asArray(reply[4]);
     const groups: DelayedGroupsPage["groups"] = [];
-    for (let i = 0; i + 2 < rows.length; i += 3) {
+    for (let i = 0; i + 3 < rows.length; i += 4) {
+      const status = rows[i + 3];
       groups.push({
         id: String(rows[i]),
         delayed: asNumber(rows[i + 1]),
         nextRunAt: delayedUntilFromScore("delayed", parseScore(rows[i + 2])) ?? 0,
+        status: typeof status === "string" && isGroupStatus(status) ? status : null,
       });
     }
     const next = asNumber(reply[0], -1);

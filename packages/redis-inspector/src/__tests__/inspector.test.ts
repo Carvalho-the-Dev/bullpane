@@ -1653,6 +1653,8 @@ describe("getDelayedGroups", () => {
     await add(120_000, { gid: "tenant-a" });
     await add(90_000, { optsGroup: "tenant-b" });
     await add(30_000, {});
+    // tenant-b also has a waiting job, so Pro indexes it; tenant-a has only delayed jobs
+    await raw.zadd("bull:delayed-groups:groups:paused", Date.now(), "tenant-b");
   });
 
   it("counts the delayed jobs of each group, with its soonest run, and the ungrouped ones", async () => {
@@ -1662,6 +1664,9 @@ describe("getDelayedGroups", () => {
     const byId = Object.fromEntries(page.groups.map((g) => [g.id, g]));
     expect(byId["tenant-a"]?.delayed).toBe(2);
     expect(byId["tenant-b"]?.delayed).toBe(1);
+    // read from Pro's status zsets in the same script, for every group of the slice
+    expect(byId["tenant-a"]?.status).toBeNull();
+    expect(byId["tenant-b"]?.status).toBe("paused");
     expect(byId["tenant-a"]?.nextRunAt).toBeGreaterThanOrEqual(before + 50_000);
     expect(byId["tenant-a"]?.nextRunAt).toBeLessThan(before + 70_000);
   });

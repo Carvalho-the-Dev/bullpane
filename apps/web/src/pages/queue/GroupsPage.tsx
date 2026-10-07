@@ -46,8 +46,6 @@ export function GroupsPage() {
   const [pageSize, setPageSize] = useState(50);
   const summary = useQueue(connectionId, queue);
   const groups = useGroups(connectionId, queue, { page, pageSize });
-  // Every indexed id (first 200), to tell "delayed only" groups from indexed ones on other pages.
-  const indexed = useGroups(connectionId, queue, { page: 1, pageSize: 200 });
   const delayed = useDelayedGroupCounts(connectionId, queue, (summary.data?.counts.delayed ?? 0) > 0);
   const groupAction = useGroupAction(connectionId, queue);
   const [promoteGroup, setPromoteGroup] = useState<string | null>(null);
@@ -57,21 +55,24 @@ export function GroupsPage() {
   const showActions = isOperator;
   const cols = 7 + (showActions ? 1 : 0);
 
-  const indexedIds = useMemo(() => new Set(indexed.data?.groups.map((g) => g.id) ?? []), [indexed.data]);
-  /** groups whose jobs are all delayed: Pro indexes none of them, only the scan sees them */
+  /**
+   * Groups whose jobs are all delayed: Pro indexes none of them, only the scan sees
+   * them, and the scan says per group whether it is indexed (no client-side guess).
+   */
   const delayedOnly = useMemo(
     () =>
-      indexed.data
-        ? [...delayed.counts.entries()]
-            .filter(([id]) => !indexedIds.has(id))
-            .map(([id, c]) => ({ id, ...c }))
-            .sort((x, y) => y.delayed - x.delayed)
-        : [],
-    [delayed.counts, indexedIds, indexed.data],
+      [...delayed.counts.entries()]
+        .filter(([, c]) => c.status === null)
+        .map(([id, c]) => ({ id, ...c }))
+        .sort((x, y) => y.delayed - x.delayed),
+    [delayed.counts],
   );
-  // "delayed only" rows follow the indexed groups, on the last page of those
-  const indexedPages = Math.max(1, Math.ceil((groups.data?.total ?? 0) / pageSize));
-  const lastPage = page === indexedPages;
+  // One row space: the indexed groups (paged by the server), then the delayed-only
+  // ones (paged here). A page takes the indexed rows the server returned for its
+  // range and fills the rest from the delayed-only list.
+  const indexedTotal = groups.data?.total ?? 0;
+  const rangeStart = (page - 1) * pageSize;
+  const delayedOnlyPage = delayedOnly.slice(Math.max(0, rangeStart - indexedTotal), Math.max(0, rangeStart + pageSize - indexedTotal));
 
   const runGroup = (groupId: string, action: GroupActionKind) =>
     groupAction.mutate(
@@ -130,7 +131,7 @@ export function GroupsPage() {
         <StatusStrip
           byStatus={groups.data.byStatus}
           total={groups.data.total}
-          delayedOnly={indexed.data ? delayedOnly.length : null}
+          delayedOnly={delayedOnly.length}
           delayedScan={(summary.data?.counts.delayed ?? 0) > 0 ? delayed : null}
         />
       )}
@@ -175,8 +176,7 @@ export function GroupsPage() {
                 actions={actionsFor(g.id, { paused: g.status === "paused", waiting: g.waiting, delayed: delayed.counts.get(g.id)?.delayed ?? (delayed.complete ? 0 : null) })}
               />
             ))}
-            {lastPage &&
-              delayedOnly.map((g) => (
+            {delayedOnlyPage.map((g) => (
                 <DelayedOnlyRow
                   key={g.id}
                   id={g.id}
@@ -194,8 +194,8 @@ export function GroupsPage() {
           <Pagination
             page={page}
             pageSize={pageSize}
-            total={(groups.data?.total ?? 0) + delayedOnly.length}
-            count={(groups.data?.groups.length ?? 0) + (lastPage ? delayedOnly.length : 0)}
+            total={indexedTotal + delayedOnly.length}
+            count={(groups.data?.groups.length ?? 0) + delayedOnlyPage.length}
             onPage={setPage}
             onPageSize={(s) => (setPageSize(s), setPage(1))}
           />
@@ -300,10 +300,10 @@ function StatusStrip({
 }: {
   byStatus: GroupsByStatus;
   total: number;
-  delayedOnly: number | null;
+  delayedOnly: number;
   delayedScan: ReturnType<typeof useDelayedGroupCounts> | null;
 }) {
-  const extra = delayedOnly ?? 0;
+  const extra = delayedOnly;
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
       {GROUP_STATUSES.map((s) => (
@@ -323,8 +323,8 @@ function StatusStrip({
               delayed only
             </Badge>
             <span className="num font-medium">
-              {delayedOnly === null || delayedScan.loading ? "…" : formatNumber(extra)}
-              {!delayedScan.complete && delayedOnly !== null && "+"}
+              {delayedScan.loading ? "…" : formatNumber(extra)}
+              {!delayedScan.complete && "+"}
             </span>
           </span>
         </Tooltip>

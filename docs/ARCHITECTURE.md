@@ -661,10 +661,12 @@ against `@taskforcesh/bullmq-pro` 7.48.0. The facts that shape the reader:
   delayed: often exactly the groups an operator wants to act on. The groups table therefore
   has a Delayed column and "delayed only" rows, from `getDelayedGroups.lua`: a bounded slice
   of `delayed` per call (soonest first), one HMGET of the group fields and opts per job,
-  counts and soonest run per group. The UI chains up to 10 calls and sums them (a "+" while
-  part of the state is unscanned). "Delayed only" means not among the first 200 indexed
-  groups, which the page reads to tell them apart; they are listed after the indexed
-  groups, on the last page.
+  counts and soonest run per group, and per distinct group one ZSCORE in each of the four
+  status zsets, so the scan itself says whether Pro indexes the group (no client-side
+  guess, whatever the number of groups). The UI chains up to 10 calls and sums them (a "+"
+  while part of the state is unscanned). The "delayed only" rows (not indexed) continue the
+  indexed groups in one paginated row space: the server pages the indexed part, the page
+  fills the rest from the delayed-only list.
 
 Reads are read-only, one EVALSHA per page (`getGroups.lua`). The simulator writes the same
 layout so the demo shows groups without needing a Pro token.

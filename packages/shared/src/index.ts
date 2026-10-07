@@ -1010,7 +1010,11 @@ export interface GroupsPage {
  * adds them up across calls.
  */
 export interface DelayedGroupsPage {
-  groups: { id: string; delayed: number; nextRunAt: number }[];
+  /**
+   * `status` is the group's place in Pro's index when it has one, null when Pro does
+   * not index it (all its jobs are delayed): read per group in the same script.
+   */
+  groups: { id: string; delayed: number; nextRunAt: number; status: GroupStatus | null }[];
   /** delayed jobs without a group in this slice */
   ungrouped: number;
   scanned: number;
