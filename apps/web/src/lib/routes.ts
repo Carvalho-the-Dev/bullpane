@@ -43,7 +43,10 @@ export const routes = {
     const qs = sp.toString();
     return qs ? `/audit?${qs}` : "/audit";
   },
+  /** /flows/:cid is the whole-connection graph ("All queues") */
   flows: (cid?: string) => (cid ? `/flows/${e(cid)}` : "/flows"),
+  /** one flow map, manual or detected (`detected:<cid>:<root>`) */
+  flowMap: (id: string) => `/flows?map=${e(id)}`,
   settings: (tab: "connections" | "license" | "about" = "connections") => `/settings/${tab}`,
 };
 

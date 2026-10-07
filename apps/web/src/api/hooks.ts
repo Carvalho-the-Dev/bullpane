@@ -33,6 +33,9 @@ import type {
   Edition,
   FlowEdge,
   FlowGraph,
+  FlowMap,
+  FlowMapsResponse,
+  AddFlowMapNodeInput,
   Folder,
   DiscoveryStatus,
   GroupsResponse,
@@ -60,6 +63,11 @@ import type {
   UpdateUserInput,
   User,
   createFlowEdgeSchema,
+  createFlowMapEdgeSchema,
+  createFlowMapSchema,
+  saveFlowMapLayoutSchema,
+  updateFlowMapEdgeSchema,
+  updateFlowMapSchema,
   createFolderSchema,
   setFolderQueuesSchema,
   testConnectionSchema,
@@ -72,7 +80,7 @@ import type {
   McpSettings,
   UpdateMcpSettingsInput,
 } from "@bullpane/shared";
-import { api, buildUrl, seg } from "./client";
+import { api, buildUrl, isApiError, seg } from "./client";
 
 // ---------------------------------------------------------------------------
 // Shapes referenced by API.md that are not (yet) in @bullpane/shared.
@@ -162,6 +170,9 @@ export const POLL = {
   health: 3_000,
   setup: 10_000,
   slow: 15_000,
+  /** the open flow map: short so a map drawn by an MCP client shows up while it is drawn */
+  flowMap: 2_000,
+  flowMaps: 5_000,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -197,6 +208,8 @@ export const qk = {
   groupJobs: (cid: string, q: string, gid: string, p: PageParams) =>
     ["connections", cid, "queue", q, "groups", gid, "jobs", p] as const,
   flows: (cid: string, sample: number) => ["flows", cid, sample] as const,
+  flowMaps: ["flow-maps"] as const,
+  flowMap: (id: string) => ["flow-maps", id] as const,
   hiddenQueues: (cid: string) => ["connections", cid, "hidden-queues"] as const,
   folders: ["folders"] as const,
   alerts: ["alerts"] as const,
@@ -1054,6 +1067,111 @@ export function useDeleteFlowEdge() {
     mutationFn: (id: string) => api.del<{ ok: boolean }>(`/flow-edges/${seg(id)}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["flows"] }),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Flow maps (Pro)
+//
+// Every write on one map answers the whole FlowMap, so the cache is set from
+// the response (the canvas updates without waiting for the 2 s poll) and the
+// list is invalidated for its node/edge counts.
+// ---------------------------------------------------------------------------
+export function useFlowMaps(enabled = true) {
+  return useQuery({
+    queryKey: qk.flowMaps,
+    queryFn: () => api.get<FlowMapsResponse>("/flow-maps", { silent: [402] }),
+    enabled,
+    refetchInterval: poll(POLL.flowMaps),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useFlowMap(id: string | null | undefined, enabled = true) {
+  return useQuery({
+    queryKey: qk.flowMap(id ?? ""),
+    queryFn: () => api.get<FlowMap>(`/flow-maps/${seg(id!)}`, { silent: [402, 404] }),
+    enabled: enabled && !!id,
+    refetchInterval: poll(POLL.flowMap),
+    retry: (count, e) => !(isApiError(e) && e.status === 404) && count < 2,
+  });
+}
+
+function useFlowMapWrite<TVars>(fn: (v: TVars) => Promise<FlowMap>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (map) => {
+      qc.setQueryData(qk.flowMap(map.id), map);
+      void qc.invalidateQueries({ queryKey: qk.flowMaps, exact: true });
+    },
+  });
+}
+
+export function useCreateFlowMap() {
+  return useFlowMapWrite((input: z.input<typeof createFlowMapSchema>) => api.post<FlowMap>("/flow-maps", input));
+}
+
+export function useUpdateFlowMap() {
+  return useFlowMapWrite(({ id, input }: { id: string; input: z.input<typeof updateFlowMapSchema> }) =>
+    api.patch<FlowMap>(`/flow-maps/${seg(id)}`, input),
+  );
+}
+
+export function useDeleteFlowMap() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ ok: boolean }>(`/flow-maps/${seg(id)}`),
+    onSuccess: (_r, id) => {
+      qc.removeQueries({ queryKey: qk.flowMap(id), exact: true });
+      // children moved to the parent: their parentId changed
+      void qc.invalidateQueries({ queryKey: qk.flowMaps });
+    },
+  });
+}
+
+export function useCopyFlowMap() {
+  return useFlowMapWrite(({ id, name, parentId }: { id: string; name?: string; parentId?: string | null }) =>
+    api.post<FlowMap>(`/flow-maps/${seg(id)}/copy`, { name, parentId }),
+  );
+}
+
+export function useAddFlowMapNode() {
+  return useFlowMapWrite(({ mapId, input }: { mapId: string; input: AddFlowMapNodeInput }) =>
+    api.post<FlowMap>(`/flow-maps/${seg(mapId)}/nodes`, input),
+  );
+}
+
+export function useRemoveFlowMapNode() {
+  return useFlowMapWrite(({ mapId, nodeId }: { mapId: string; nodeId: string }) =>
+    api.del<FlowMap>(`/flow-maps/${seg(mapId)}/nodes/${seg(nodeId)}`),
+  );
+}
+
+/** Positions only: no cache write (the canvas already shows them) and no list refresh. */
+export function useSaveFlowMapLayout() {
+  return useMutation({
+    mutationFn: ({ mapId, input }: { mapId: string; input: z.input<typeof saveFlowMapLayoutSchema> }) =>
+      api.put<{ ok: boolean }>(`/flow-maps/${seg(mapId)}/layout`, input),
+  });
+}
+
+export function useCreateFlowMapEdge() {
+  return useFlowMapWrite(({ mapId, input }: { mapId: string; input: z.input<typeof createFlowMapEdgeSchema> }) =>
+    api.post<FlowMap>(`/flow-maps/${seg(mapId)}/edges`, input),
+  );
+}
+
+export function useUpdateFlowMapEdge() {
+  return useFlowMapWrite(
+    ({ mapId, edgeId, input }: { mapId: string; edgeId: string; input: z.input<typeof updateFlowMapEdgeSchema> }) =>
+      api.patch<FlowMap>(`/flow-maps/${seg(mapId)}/edges/${seg(edgeId)}`, input),
+  );
+}
+
+export function useDeleteFlowMapEdge() {
+  return useFlowMapWrite(({ mapId, edgeId }: { mapId: string; edgeId: string }) =>
+    api.del<FlowMap>(`/flow-maps/${seg(mapId)}/edges/${seg(edgeId)}`),
+  );
 }
 
 // ---------------------------------------------------------------------------

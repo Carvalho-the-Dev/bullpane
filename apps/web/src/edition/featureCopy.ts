@@ -45,11 +45,11 @@ export const FEATURE_COPY: Record<ProFeature, FeatureCopy> = {
   },
   flows: {
     title: "Flows",
-    tagline: "See how queues feed each other, detected from BullMQ flow parents plus your own edges.",
+    tagline: "Named maps of the queues each process goes through, with live counts, drawn by you or by your AI client.",
     bullets: [
-      "Edges detected from job parent references with evidence counts",
-      "Manual edges for producer → consumer relationships Redis cannot see",
-      "Auto-layout graph with live counts and paused state per queue",
+      "Flow maps across connections: one Redis to another, Redis to Postgres",
+      "Maps detected from BullMQ FlowProducer parents, with evidence counts",
+      "Draw arrows by hand or over MCP; the map updates live while it is drawn",
     ],
   },
   sso: {
