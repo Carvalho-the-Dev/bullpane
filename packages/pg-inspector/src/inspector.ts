@@ -19,6 +19,7 @@ import {
   type BulkJobActionResult,
   type BulkJobFailure,
   type PromoteMatchingResult,
+  type DelayedGroupsPage,
   type DiscoveryStatus,
   type GroupsPage,
   type JobDetail,
@@ -690,6 +691,10 @@ export class PgInspector implements Inspector {
 
   async getGroupJobs(_queueName: string, _groupId: string, opts: { start: number; end: number }): Promise<JobsPage> {
     return { jobs: [], total: 0, start: opts.start, end: opts.end };
+  }
+
+  async getDelayedGroups(): Promise<DelayedGroupsPage> {
+    return { groups: [], ungrouped: 0, scanned: 0, total: 0, nextCursor: null };
   }
 
   readonly bullmqProApi = false;

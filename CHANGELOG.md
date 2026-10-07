@@ -28,8 +28,16 @@ written from this file — when you add an entry here, mirror it there
   are delayed, which the groups page cannot list: pausing one works and its
   jobs join it paused.
 
+- **Groups with delayed jobs, on the groups page.** Pro does not index a group
+  whose jobs are all delayed, so the groups list never showed it. A section
+  under the list scans the delayed state (bounded, group fields only) and lists
+  each group with its number of delayed jobs and next run, with "Promote all"
+  and "Pause" per group.
+
 ### Fixed
 
+- **Tooltips no longer wrap one word per line** inside narrow chips: they size
+  to their text, up to the usual maximum width.
 - **The waiting count of a BullMQ Pro queue counts the jobs waiting in groups.**
   Pro keeps a group's waiting jobs in the group's own list, not in the queue's
   wait list, so a queue with thousands of grouped jobs showed "waiting 0". The

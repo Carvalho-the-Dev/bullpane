@@ -1002,6 +1002,22 @@ export interface GroupsPage {
  * next to Bullpane: the group actions (pause, resume, drain) and group-aware
  * promote / retry / remove need it (docs/BULLMQ-PRO.md).
  */
+/**
+ * BullMQ Pro: groups that have delayed jobs. Pro keeps those jobs in the queue's
+ * `delayed` zset, not under the group, and a group whose jobs are all delayed is in
+ * no index, so GET /groups cannot list it. This comes from a bounded, resumable
+ * scan of `delayed` (soonest first); counts are for the slice scanned, so the UI
+ * adds them up across calls.
+ */
+export interface DelayedGroupsPage {
+  groups: { id: string; delayed: number; nextRunAt: number }[];
+  /** delayed jobs without a group in this slice */
+  ungrouped: number;
+  scanned: number;
+  total: number;
+  nextCursor: string | null;
+}
+
 export interface GroupsResponse extends GroupsPage {
   bullmqProApi: boolean;
 }

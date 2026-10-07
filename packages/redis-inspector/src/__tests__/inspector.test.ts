@@ -1635,3 +1635,46 @@ describe("promoteMatching", () => {
     await expect(inspector.promoteMatching("promote-query", {}, { limit: 10 })).rejects.toThrow(/query_or_group_required/);
   });
 });
+
+describe("getDelayedGroups", () => {
+  // Delayed grouped jobs are marked by `gid` on the hash or opts.group.id (Pro layout, by hand).
+  beforeAll(async () => {
+    const queue = q("delayed-groups");
+    const add = async (delay: number, mark: { gid?: string; optsGroup?: string }) => {
+      const job = await queue.add("send", { n: delay }, { delay });
+      const key = `bull:delayed-groups:${job.id}`;
+      if (mark.gid) await raw.hset(key, "gid", mark.gid);
+      if (mark.optsGroup) {
+        const opts = JSON.parse((await raw.hget(key, "opts")) ?? "{}");
+        await raw.hset(key, "opts", JSON.stringify({ ...opts, group: { id: mark.optsGroup } }));
+      }
+    };
+    await add(60_000, { gid: "tenant-a" });
+    await add(120_000, { gid: "tenant-a" });
+    await add(90_000, { optsGroup: "tenant-b" });
+    await add(30_000, {});
+  });
+
+  it("counts the delayed jobs of each group, with its soonest run, and the ungrouped ones", async () => {
+    const before = Date.now();
+    const page = await inspector.getDelayedGroups("delayed-groups", {});
+    expect(page).toMatchObject({ scanned: 4, total: 4, ungrouped: 1, nextCursor: null });
+    const byId = Object.fromEntries(page.groups.map((g) => [g.id, g]));
+    expect(byId["tenant-a"]?.delayed).toBe(2);
+    expect(byId["tenant-b"]?.delayed).toBe(1);
+    expect(byId["tenant-a"]?.nextRunAt).toBeGreaterThanOrEqual(before + 50_000);
+    expect(byId["tenant-a"]?.nextRunAt).toBeLessThan(before + 70_000);
+  });
+  it("scans groupScanPerCall jobs per call and resumes from the cursor", async () => {
+    const small = new RedisInspector({ id: "dg", url: URL }, { groupScanPerCall: 3 });
+    const first = await small.getDelayedGroups("delayed-groups", {});
+    expect(first.scanned).toBe(3);
+    expect(first.nextCursor).toBe("3");
+    const second = await small.getDelayedGroups("delayed-groups", { cursor: first.nextCursor });
+    expect(second.scanned).toBe(1);
+    expect(second.nextCursor).toBeNull();
+    const delayed = [...first.groups, ...second.groups].reduce((n, g) => n + g.delayed, 0);
+    expect(delayed + first.ungrouped + second.ungrouped).toBe(4);
+    await small.close();
+  });
+});

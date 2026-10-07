@@ -11,6 +11,7 @@ import {
   type BulkJobAction,
   type BulkJobActionResult,
   type BulkJobFailure,
+  type DelayedGroupsPage,
   type DiscoveryStatus,
   GROUP_STATUSES,
   type GroupStatus,
@@ -59,6 +60,7 @@ import {
   hashToDetail,
   hashToSummary,
   parseScore,
+  delayedUntilFromScore,
   metricPoints,
   parseGroupId,
   parseOpts,
@@ -969,6 +971,37 @@ export class RedisInspector implements Inspector {
       ...opts,
       order: "desc",
     });
+  }
+
+  /**
+   * One EVALSHA over a slice of `delayed` (groupScanPerCall jobs, soonest first):
+   * one HMGET of the group fields + opts per job, never the payload, and the
+   * search byte budget on the opts read. See getDelayedGroups.lua.
+   */
+  async getDelayedGroups(queueName: string, opts: { cursor?: string | null }): Promise<DelayedGroupsPage> {
+    const c = await this.ensureConnected();
+    const cursor = Math.max(0, toInt(opts.cursor ?? "0", 0));
+    const reply = asArray(
+      await callScript(c, "getDelayedGroups", [
+        stateKey(this.config.prefix, queueName, "delayed"),
+        cursor,
+        this.opts.groupScanPerCall,
+        queueKeyPrefix(this.config.prefix, queueName),
+        GROUP_ID_FIELDS.join(","),
+        this.opts.searchByteBudget,
+      ]),
+    );
+    const rows = asArray(reply[4]);
+    const groups: DelayedGroupsPage["groups"] = [];
+    for (let i = 0; i + 2 < rows.length; i += 3) {
+      groups.push({
+        id: String(rows[i]),
+        delayed: asNumber(rows[i + 1]),
+        nextRunAt: delayedUntilFromScore("delayed", parseScore(rows[i + 2])) ?? 0,
+      });
+    }
+    const next = asNumber(reply[0], -1);
+    return { groups, ungrouped: asNumber(reply[3]), scanned: asNumber(reply[1]), total: asNumber(reply[2]), nextCursor: next < 0 ? null : String(next) };
   }
 
   // ---------------------------------------------------------------------------

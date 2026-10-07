@@ -36,6 +36,7 @@ import type {
   Folder,
   DiscoveryStatus,
   GroupsResponse,
+  DelayedGroupsPage,
   HiddenQueue,
   JobDetail,
   JobSearchResult,
@@ -560,6 +561,18 @@ export function usePromoteMatching(cid: string, queue: string) {
   return useMutation({
     mutationFn: (input: PromoteMatchingInput) => api.post<PromoteMatchingResult>(`${queuePath(cid, queue)}/jobs/promote-matching`, input),
     onSettled: () => qc.invalidateQueries({ queryKey: qk.queue(cid, queue) }),
+  });
+}
+
+/** Groups with delayed jobs: pages of a bounded scan of `delayed`, continued by cursor. */
+export function useDelayedGroups(cid: string | undefined, queue: string | undefined, opts: { enabled?: boolean } = {}) {
+  return useInfiniteQuery({
+    queryKey: [...qk.queue(cid ?? "", queue ?? ""), "delayed-groups"] as const,
+    queryFn: ({ pageParam }) => api.get<DelayedGroupsPage>(`${queuePath(cid!, queue!)}/groups-delayed`, { query: { cursor: pageParam } }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    enabled: !!cid && !!queue && (opts.enabled ?? true),
+    staleTime: 30_000,
   });
 }
 

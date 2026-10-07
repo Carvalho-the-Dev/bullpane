@@ -18,6 +18,7 @@
 import type {
   BulkJobAction,
   BulkJobActionResult,
+  DelayedGroupsPage,
   DiscoveryStatus,
   GroupsPage,
   JobScheduler,
@@ -306,6 +307,8 @@ export interface Inspector {
   // --- BullMQ Pro groups (read) ------------------------------------------
   getGroups(queueName: string, opts: { start: number; end: number }): Promise<GroupsPage>;
   getGroupJobs(queueName: string, groupId: string, opts: { start: number; end: number }): Promise<JobsPage>;
+  /** Groups that have delayed jobs, from one bounded slice of `delayed` (getDelayedGroups.lua). */
+  getDelayedGroups(queueName: string, opts: { cursor?: string | null }): Promise<DelayedGroupsPage>;
 
   // --- job schedulers (repeatable jobs) -----------------------------------
   /**

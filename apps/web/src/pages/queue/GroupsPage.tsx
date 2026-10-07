@@ -20,6 +20,7 @@ import { JobsTable } from "@/components/JobsTable";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/Button";
 import { PromoteMatchingDialog } from "@/components/PromoteMatchingDialog";
+import { DelayedGroupsPanel } from "./DelayedGroupsPanel";
 
 const STATUS_VARIANT: Record<GroupStatus, BadgeVariant> = {
   waiting: "info",
@@ -60,7 +61,7 @@ export function GroupsPage() {
             <Badge variant="pro">BullMQ Pro</Badge>
           </span>
         }
-        description={`Groups partition a queue for fairness, with their own concurrency and rate limit. ${summary.data ? `${formatNumber(summary.data.groupsCount)} groups with jobs waiting or running.` : ""} A group whose jobs are all delayed is not listed until one becomes due: Pro keeps delayed jobs in the queue's delayed state, not under the group. Filter the queue's Delayed tab by group to see them.`}
+        description={`Groups partition a queue for fairness, with their own concurrency and rate limit. ${summary.data ? `${formatNumber(summary.data.groupsCount)} groups with jobs waiting or running.` : ""} A group whose jobs are all delayed is not in this list (Pro keeps delayed jobs in the queue's delayed state, not under the group): those are under "Groups with delayed jobs" below.`}
       />
 
       {groups.data && <StatusStrip byStatus={groups.data.byStatus} total={groups.data.total} />}
@@ -101,6 +102,8 @@ export function GroupsPage() {
           <Pagination page={page} pageSize={pageSize} total={groups.data?.total ?? 0} count={groups.data?.groups.length} onPage={setPage} onPageSize={(s) => (setPageSize(s), setPage(1))} />
         </div>
       </div>
+
+      {(summary.data?.counts.delayed ?? 0) > 0 && <DelayedGroupsPanel connectionId={connectionId} queue={queue} proApi={groups.data?.bullmqProApi ?? false} />}
     </Page>
   );
 }
