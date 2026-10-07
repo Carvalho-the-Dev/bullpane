@@ -434,8 +434,8 @@ describe("flow maps: detected", () => {
     expect(map.nodes.map((n) => n.queueName).sort()).toEqual(["child-a", "child-b", "parent"]);
     expect(map.edges).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: `d:${conn}:child-a->${conn}:parent`, source: "detected", evidence: 3 }),
-        expect.objectContaining({ from: `${conn}:child-b`, to: `${conn}:parent`, evidence: 2 }),
+        expect.objectContaining({ id: `d:${conn}:parent->${conn}:child-a`, source: "detected", evidence: 3 }),
+        expect.objectContaining({ from: `${conn}:parent`, to: `${conn}:child-b`, evidence: 2 }),
       ]),
     );
     expect((await w.call("GET", `/flow-maps/${encodeURIComponent(`detected:${conn}:child-a`)}`)).statusCode).toBe(404);

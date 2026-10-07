@@ -44,7 +44,7 @@ export function ConnectionGraph({ connectionId }: { connectionId: string }) {
   useEffect(() => {
     const g: FlowGraph | undefined = flows.data;
     if (!g) return;
-    const pos = layoutGraph(g.nodes.map((n) => ({ id: n.id })), g.edges, LAYOUT);
+    const pos = layoutGraph(g.nodes.map((n) => ({ id: n.id })), g.edges.map(drawnDirection), LAYOUT);
     setNodes((prev) => {
       const prevById = new Map(prev.map((n) => [n.id, n]));
       return g.nodes.map((n) => {
@@ -55,20 +55,21 @@ export function ConnectionGraph({ connectionId }: { connectionId: string }) {
         return { id: n.id, type: "queue" as const, position: { x: at.x, y: at.y }, data, width: NODE_W, height: NODE_H, deletable: false };
       });
     });
-    setEdges(g.edges.map((e) => ({ ...toFlowEdge(e), deletable: false })));
+    setEdges(g.edges.map((e) => ({ ...toFlowEdge(drawnDirection(e)), deletable: false })));
   }, [flows.data, connectionId, setNodes, setEdges]);
 
   const resetLayout = useCallback(() => {
     moved.current.clear();
     const g = flows.data;
     if (!g) return;
-    const pos = layoutGraph(g.nodes.map((n) => ({ id: n.id })), g.edges, LAYOUT);
+    const pos = layoutGraph(g.nodes.map((n) => ({ id: n.id })), g.edges.map(drawnDirection), LAYOUT);
     setNodes((ns) => ns.map((n) => ({ ...n, position: pos.get(n.id) ?? n.position })));
   }, [flows.data, setNodes]);
 
   const detected = flows.data?.edges.filter((e) => e.source === "detected").length ?? 0;
   const manual = flows.data?.edges.filter((e) => e.source === "manual").length ?? 0;
-  const selectedEdge: FlowEdge | null = (selectedEdgeId && flows.data?.edges.find((e) => e.id === selectedEdgeId)) || null;
+  const found = selectedEdgeId ? flows.data?.edges.find((e) => e.id === selectedEdgeId) : undefined;
+  const selectedEdge: FlowEdge | null = found ? drawnDirection(found) : null;
   const selectedNodeId = nodes.find((n) => n.selected)?.id;
   const selectedNode = selectedNodeId ? flows.data?.nodes.find((n) => n.id === selectedNodeId) ?? null : null;
   const openEdge = useCallback((id: string) => setSelectedEdgeId(id), []);
@@ -152,7 +153,7 @@ export function ConnectionGraph({ connectionId }: { connectionId: string }) {
           <div className="pointer-events-auto flex max-w-sm items-start gap-2 rounded-md border border-border bg-surface/95 px-3 py-2 text-[11px] text-fg-muted shadow-sm">
             <Info className="mt-px size-3.5 shrink-0 text-info" aria-hidden />
             <span>
-              Detected edges come from BullMQ flows: children carry a <span className="font-mono">parent</span> reference, so the arrow points from the child queue to the parent that waits for it. A worker that simply calls <span className="font-mono">otherQueue.add()</span> leaves no trace in Redis; draw those by hand, or build a flow map. Double-click a queue to open it.
+              Detected edges come from BullMQ flows: children carry a <span className="font-mono">parent</span> reference, and the arrow points from the parent to each child queue it waits for. A worker that simply calls <span className="font-mono">otherQueue.add()</span> leaves no trace in Redis; draw those by hand, or build a flow map. Double-click a queue to open it.
             </span>
           </div>
         </div>
@@ -232,6 +233,14 @@ export function ConnectionGraph({ connectionId }: { connectionId: string }) {
       )}
     </div>
   );
+}
+
+/**
+ * Redis stores a detected edge child → parent; it is drawn parent → child, the
+ * way a FlowProducer reads in code (same as on flow maps).
+ */
+function drawnDirection(e: FlowEdge): FlowEdge {
+  return e.source === "detected" ? { ...e, from: e.to, to: e.from } : e;
 }
 
 function AddEdgeDialog({ open, onClose, queues, onSave, saving }: { open: boolean; onClose: () => void; queues: string[]; onSave: (from: string, to: string, label: string) => void; saving: boolean }) {

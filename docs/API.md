@@ -487,6 +487,9 @@ queue. A connection that is down or still sampling contributes nothing and sets
 **Building a map's graph.** Counts come from one `getQueueStats` call per
 connection on the map (only the queues on it), and detected edges from that
 connection's cached sample, filtered to edges whose both ends are on the map.
+On a map, a detected edge points from the FlowProducer parent to the child
+queue (`from` = parent), the way the flow reads in code; the connection-level
+`FlowEdge` above keeps Redis' child → parent direction.
 A queue that is not discovered, or a connection that is down or deleted, gives
 a node with `missing: true` and empty counts, never a 5xx.
 

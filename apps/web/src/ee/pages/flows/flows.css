@@ -92,6 +92,9 @@
     stroke-dashoffset: -11;
   }
 }
+.fm-arrowhead {
+  animation: fm-fade-in 200ms ease-out both;
+}
 .fm-edge-label {
   animation: fm-fade-in 300ms ease-out 450ms both;
 }
@@ -134,6 +137,7 @@
   .fm-node,
   .fm-node.fm-fresh,
   .fm-edge-label,
+  .fm-arrowhead,
   .fm-edge-flow,
   .fm-tree-fresh {
     animation: none;

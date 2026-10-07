@@ -8,8 +8,8 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   getBezierPath,
+  useInternalNode,
   Handle,
-  MarkerType,
   Position,
   type Edge,
   type EdgeProps,
@@ -161,8 +161,26 @@ export const EdgeLabelClickContext = createContext<((edgeId: string, e: MouseEve
 
 const EDGE_COLOR = { manual: "var(--fm-edge-manual)", detected: "var(--fm-edge-detected)" } as const;
 
-export function edgeMarker(source: "manual" | "detected") {
-  return { type: MarkerType.ArrowClosed, color: EDGE_COLOR[source], width: 16, height: 16 } as const;
+/**
+ * The arrowhead, drawn as a path at the target end instead of an SVG marker:
+ * React Flow derives a marker's id from its color, and a `var(--…)` color
+ * makes an id that `url(#…)` cannot reference, so no arrowhead showed at all.
+ * The tip sits on the target node's border (see FlowEdgeView), not on
+ * React Flow's handle point, which lands inside the node, under it.
+ */
+function arrowHead(x: number, y: number, side: Position, size: number): string {
+  const s = size;
+  const h = s * 0.6;
+  switch (side) {
+    case Position.Left:
+      return `M${x - s},${y - h} L${x},${y} L${x - s},${y + h} Z`;
+    case Position.Right:
+      return `M${x + s},${y - h} L${x},${y} L${x + s},${y + h} Z`;
+    case Position.Top:
+      return `M${x - h},${y - s} L${x},${y} L${x + h},${y - s} Z`;
+    default:
+      return `M${x - h},${y + s} L${x},${y} L${x + h},${y + s} Z`;
+  }
 }
 
 export function toFlowEdge(
@@ -175,15 +193,29 @@ export function toFlowEdge(
     target: e.to,
     type: "flow",
     data: { source: e.source, label: e.label, evidence: e.evidence, cross },
-    markerEnd: edgeMarker(e.source),
     // React Flow's own keyboard deletion is routed through onBeforeDelete; detected edges never delete.
     deletable: e.source === "manual",
   };
 }
 
+/** half of `.fm-handle`'s 10px */
+const HANDLE_R = 5;
+
 export const FlowEdgeView = memo(function FlowEdgeView(props: EdgeProps<FlowEdgeT>) {
-  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, selected, data } = props;
+  const { id, sourceX, sourceY, targetX: handleX, targetY, sourcePosition, targetPosition, selected, data } = props;
   const onLabelClick = useContext(EdgeLabelClickContext);
+  // Tip just outside the handle dot centered on the node's border (flows.css:
+  // 10px handles). The handle point React Flow hands us sits inside the node,
+  // where the node would cover the arrowhead.
+  const targetNode = useInternalNode(props.target);
+  const tipX =
+    targetNode && targetPosition === Position.Left
+      ? targetNode.internals.positionAbsolute.x - HANDLE_R
+      : targetNode && targetPosition === Position.Right
+        ? targetNode.internals.positionAbsolute.x + (targetNode.measured.width ?? 0) + HANDLE_R
+        : handleX;
+  const head = selected ? 11 : 9;
+  const targetX = targetPosition === Position.Left ? tipX - head : targetPosition === Position.Right ? tipX + head : tipX;
   const [path, lx, ly] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, curvature: 0.35 });
   // Draw once on mount; the arrowhead and the flowing dashes come after.
   const [drawn, setDrawn] = useState(false);
@@ -203,13 +235,13 @@ export const FlowEdgeView = memo(function FlowEdgeView(props: EdgeProps<FlowEdge
       <BaseEdge
         id={id}
         path={path}
-        markerEnd={drawn ? markerEnd : undefined}
         interactionWidth={22}
         className={cn(!drawn ? "fm-edge-draw" : detected && "fm-edge-flow")}
         // pathLength normalises the draw-in dash to 0..1; it would also rescale the flow dashes, so it goes once drawn.
         {...(!drawn ? { pathLength: 1 } : {})}
         style={{ stroke: color, strokeWidth: selected ? 2.5 : detected ? 1.5 : 1.75, opacity: selected ? 1 : 0.9 }}
       />
+      {drawn && <path d={arrowHead(tipX, targetY, targetPosition, head)} className="fm-arrowhead" style={{ fill: color }} />}
       {(label || detected || cross) && (
         <EdgeLabelRenderer>
           <div
@@ -230,7 +262,7 @@ export const FlowEdgeView = memo(function FlowEdgeView(props: EdgeProps<FlowEdge
                   type="button"
                   onClick={(e) => onLabelClick?.(id, e)}
                   className={cn(
-                    "flex max-w-48 items-center gap-1 rounded-md border bg-surface px-1.5 py-0.5 text-[10px] leading-tight shadow-sm transition-colors",
+                    "flex max-w-56 items-center gap-1 rounded-md border bg-surface px-1.5 py-0.5 text-[11px] leading-tight shadow-sm transition-colors",
                     selected ? "border-accent text-fg" : "border-border text-fg-muted hover:border-border-strong hover:text-fg",
                   )}
                 >
@@ -268,7 +300,7 @@ export function EdgeLegend({ className }: { className?: string }) {
         </svg>
         drawn
       </span>
-      <Tooltip content="From BullMQ FlowProducer: child jobs carry a parent reference, so the arrow goes from the child queue to the parent queue that waits for it.">
+      <Tooltip content="From BullMQ FlowProducer: the arrow goes from the parent queue to each child queue it waits for.">
         <span className="flex items-center gap-1.5">
           <svg width="28" height="8" aria-hidden>
             <line x1="0" y1="4" x2="28" y2="4" stroke="var(--teal)" strokeWidth="1.5" strokeDasharray="6 5" />

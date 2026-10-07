@@ -106,8 +106,8 @@ describe("detected flow maps on a real Redis", () => {
     expect(map.nodes.every((n) => !n.missing)).toBe(true);
     expect(map.nodes.find((n) => n.queueName === "fm-child-a")!.counts.waiting).toBe(1);
     expect(map.edges.map((e) => [e.from, e.to, e.source]).sort()).toEqual([
-      [`${connectionId}:fm-child-a`, `${connectionId}:fm-parent`, "detected"],
-      [`${connectionId}:fm-child-b`, `${connectionId}:fm-parent`, "detected"],
+      [`${connectionId}:fm-parent`, `${connectionId}:fm-child-a`, "detected"],
+      [`${connectionId}:fm-parent`, `${connectionId}:fm-child-b`, "detected"],
     ]);
   });
 });

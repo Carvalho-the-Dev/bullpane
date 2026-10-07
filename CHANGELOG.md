@@ -11,6 +11,20 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
+## [0.7.1] — 2026-10-07
+
+### Fixed
+
+- Flow maps: arrows now have arrowheads. They never rendered: the marker's id
+  came from a CSS-variable colour that `url(#…)` cannot reference, and the line
+  ended under the target queue's card. The arrowhead is now drawn on the edge
+  and its tip sits just outside the card.
+- Detected FlowProducer flows read the way they are written: the parent queue
+  sits on the left and its arrows fan out to the child queues it waits for
+  (they pointed child → parent before), on flow maps and on "All queues". On
+  the flow maps API a detected edge's `from` is now the parent; the
+  connection-level `GET /connections/:id/flows` keeps Redis' child → parent.
+
 ## [0.7.0] — 2026-10-07
 
 ### Added

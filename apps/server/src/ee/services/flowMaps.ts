@@ -142,9 +142,14 @@ interface MapSource {
   detectedEdges?: FlowEdge[];
 }
 
+/**
+ * On a map a detected edge points parent → child: the FlowProducer parent fans
+ * out to the queues it waits for, which is how the flow reads in code. The
+ * connection-level `FlowEdge` keeps child → parent (what Redis stores).
+ */
 function toDetectedMapEdge(connectionId: string, e: FlowEdge): FlowMapEdge {
-  const from = flowMapNodeId({ connectionId, queueName: e.from });
-  const to = flowMapNodeId({ connectionId, queueName: e.to });
+  const from = flowMapNodeId({ connectionId, queueName: e.to });
+  const to = flowMapNodeId({ connectionId, queueName: e.from });
   return { id: detectedEdgeId(from, to), from, to, source: "detected", label: null, evidence: e.evidence };
 }
 
