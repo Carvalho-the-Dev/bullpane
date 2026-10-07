@@ -1634,6 +1634,42 @@ describe("promoteMatching", () => {
   it("needs a query or a group", async () => {
     await expect(inspector.promoteMatching("promote-query", {}, { limit: 10 })).rejects.toThrow(/query_or_group_required/);
   });
+  it("counts the matches without touching them (the preview)", async () => {
+    const queue = q("promote-count");
+    for (let i = 0; i < 4; i++) await queue.add("send", { tag: "count-me", i }, { delay: 60_000 });
+    await queue.add("send", { tag: "other" }, { delay: 60_000 });
+    const res = await inspector.countMatching("promote-count", { query: '"tag":"count-me"' }, {});
+    expect(res).toMatchObject({ matched: 4, total: 5, nextCursor: null });
+    expect(await queue.getDelayedCount()).toBe(5);
+  });
+  it("spreads the matches over a window instead: soonest first, order kept, never later", async () => {
+    const queue = q("promote-spread");
+    const now = Date.now();
+    const ids: string[] = [];
+    // due in 20, 30, 40, 50 minutes; one more due in 10 s, sooner than its slot
+    for (const min of [20, 30, 40, 50]) ids.push((await queue.add("send", { tag: "spread", min }, { delay: min * 60_000 })).id!);
+    const early = (await queue.add("send", { tag: "spread", early: true }, { delay: 10_000 })).id!;
+    // a window starting in 1 minute: the job due in 10 s is already sooner than its slot
+    const from = now + 60_000;
+    const until = now + 10 * 60_000;
+    const res = await inspector.promoteMatching(
+      "promote-spread",
+      { query: '"tag":"spread"' },
+      { limit: 100, spread: { from, until, total: 5, offset: 0 } },
+    );
+    expect(res).toMatchObject({ matched: 5, promoted: 0, rescheduled: 4, unchanged: 1, failedCount: 0 });
+    const runAt = async (id: string) => Number((await raw.zscore("bull:promote-spread:delayed", id)) ?? 0) / 0x1000;
+    const times = [];
+    for (const id of ids) times.push(await runAt(id));
+    // the early job (slot 0) kept its 10 s; the four others got slots 1..4 of 0..4
+    expect(await runAt(early)).toBeLessThan(now + 15_000);
+    expect([...times].sort((a, b) => a - b)).toEqual(times);
+    // slot k of 0..4 = from + 9 min * k / 4: the first of the four gets slot 1
+    expect(times[0]!).toBeGreaterThanOrEqual(from + 2.25 * 60_000 - 2000);
+    expect(times[0]!).toBeLessThanOrEqual(from + 2.25 * 60_000 + 2000);
+    expect(times[3]!).toBeLessThanOrEqual(until + 2000);
+    for (const id of ids) expect(await (await queue.getJob(id))!.getState()).toBe("delayed");
+  });
 });
 
 describe("getDelayedGroups", () => {

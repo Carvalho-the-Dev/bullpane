@@ -18,6 +18,7 @@ import type {
   PromoteJobResult,
   PromoteMatchingInput,
   PromoteMatchingResult,
+  CountMatchingResult,
   SchedulerPromoteMode,
   AuditAction,
   AuditPage,
@@ -565,6 +566,14 @@ export function useGroups(cid: string | undefined, queue: string | undefined, pa
     enabled: !!cid && !!queue,
     refetchInterval: poll(POLL.queues),
     placeholderData: keepPreviousData,
+  });
+}
+
+/** One bounded call of GET /jobs/count-matching (the preview); PromoteMatchingDialog loops over the cursor. */
+export function useCountMatching(cid: string, queue: string) {
+  return useMutation({
+    mutationFn: (input: { query?: string; groupId?: string; cursor?: string }) =>
+      api.get<CountMatchingResult>(`${queuePath(cid, queue)}/jobs/count-matching`, { query: { query: input.query, groupId: input.groupId, cursor: input.cursor } }),
   });
 }
 

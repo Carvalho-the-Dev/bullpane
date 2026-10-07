@@ -31,6 +31,7 @@ import type {
   JobState,
   PromoteJobResult,
   PromoteMatchingResult,
+  CountMatchingResult,
   SchedulerPromoteMode,
   QueueCounts,
   QueueMetrics,
@@ -244,6 +245,18 @@ export type CleanableState =
   | "paused"
   | "prioritized";
 
+/**
+ * promoteMatching's optional "spread" mode: lay the matching jobs out evenly from
+ * `from` to `until` (unix ms), soonest first, never later than they already were.
+ * `total` jobs in all, `offset` of them handled by earlier calls.
+ */
+export interface SpreadPlan {
+  from: number;
+  until: number;
+  total: number;
+  offset: number;
+}
+
 export interface Inspector {
   readonly config: Required<Pick<InspectorConnectionConfig, "id" | "kind" | "url" | "prefix" | "cluster">> &
     InspectorConnectionConfig;
@@ -373,8 +386,10 @@ export interface Inspector {
   promoteMatching(
     queueName: string,
     match: { query?: string; groupId?: string },
-    opts: { cursor?: string | null; limit: number },
+    opts: { cursor?: string | null; limit: number; spread?: SpreadPlan },
   ): Promise<PromoteMatchingResult>;
+  /** How many delayed jobs promoteMatching would act on (bounded slices, nothing written). */
+  countMatching(queueName: string, match: { query?: string; groupId?: string }, opts: { cursor?: string | null }): Promise<CountMatchingResult>;
   /** Move an active/stalled job back to failed with a reason (operator "discard") */
   discardJob(queueName: string, jobId: string): Promise<void>;
   pauseQueue(queueName: string): Promise<void>;

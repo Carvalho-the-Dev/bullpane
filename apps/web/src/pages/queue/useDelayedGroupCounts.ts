@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import type { GroupStatus } from "@bullpane/shared";
 import { useDelayedGroups } from "@/api/hooks";
+import { mergeDelayedSlices } from "@/lib/groupRows";
 
 /**
  * Scan calls chained on their own before "scan more": 40 × 2500 jobs = 100k per round,
@@ -14,13 +14,6 @@ const AUTO_CALLS = 40;
  * or after an action, never on a timer.
  */
 const REFRESH_MS = 30_000;
-
-export interface DelayedGroupCount {
-  delayed: number;
-  nextRunAt: number;
-  /** place in Pro's index as of the latest slice that saw the group; null = not indexed */
-  status: GroupStatus | null;
-}
 
 /**
  * Delayed jobs per BullMQ Pro group. Pro keeps them in the queue's `delayed` zset,
@@ -40,20 +33,7 @@ export function useDelayedGroupCounts(connectionId: string, queue: string, enabl
     if (enabled && scan.hasNextPage && !scan.isFetching && pages.length - roundStart < AUTO_CALLS) void scan.fetchNextPage();
   }, [enabled, scan, pages.length, roundStart]);
 
-  const counts = useMemo(() => {
-    const byId = new Map<string, DelayedGroupCount>();
-    for (const p of pages) {
-      for (const g of p.groups) {
-        const seen = byId.get(g.id);
-        if (seen) {
-          seen.delayed += g.delayed;
-          seen.nextRunAt = Math.min(seen.nextRunAt, g.nextRunAt);
-          seen.status = g.status;
-        } else byId.set(g.id, { delayed: g.delayed, nextRunAt: g.nextRunAt, status: g.status });
-      }
-    }
-    return byId;
-  }, [pages]);
+  const counts = useMemo(() => mergeDelayedSlices(pages), [pages]);
 
   return {
     counts,

@@ -271,11 +271,26 @@ now" is thousands of delayed jobs nobody selects by hand. `Inspector.promoteMatc
 reuses the search script over `delayed` (group filter and / or substring, payload
 previews cut to 0 bytes since only ids are needed), stops after `PROMOTE_MATCHING_LIMIT`
 matches or 50 slices, and promotes them through `promoteJob`, so grouped jobs go back
-into their group on a Pro queue. The cursor it returns is the scan position minus the
-jobs it promoted: they left the part already scanned, so the rest moved up. The UI
-loops over the cursor with a running count and a stop button. On the queue page a
+into their group on a Pro queue. It reads soonest first (`zset-asc` in the search
+script) and its cursor is the score and id of the last job read: what it promotes or
+moves earlier ends up behind the cursor, so nothing is read twice and nothing shifts.
+
+Before acting, the dialog counts (`countMatching`, the same slices, nothing written):
+the operator sees "N jobs" before any of them runs. Then either they run now or,
+optionally, they are **spread over a window**: `Job.changeDelay` lays the matches
+out evenly from now to the chosen time in the order they were already in, and a job
+already due sooner than its slot keeps its time, so nothing is ever postponed. The
+count is the `total` of that layout and each call passes how many earlier calls laid
+out. changeDelay only moves the job within `delayed` (it keeps its group id), so it is
+safe on BullMQ Pro queues with core bullmq too. Postgres refuses `spread`: its search
+pages by index, and a rescheduled job would be read again.
+
+The UI loops over the cursor with a running count and a stop button. On the queue page a
 group filter brings a toolbar with the group actions (pause, resume, promote all
-delayed, drain), so a group Pro has not indexed (only delayed jobs) gets them too.
+delayed, drain), so a group Pro has not indexed (only delayed jobs) gets them too; the
+groups table selects several groups and runs the same actions on all of them (4 at a
+time, one audited call each). `group:<id>` in the search box is the same group filter
+plus any text (`lib/searchQuery.ts`).
 
 On the web side the selection is keyed by **jobId, never by index**
 (`apps/web/src/lib/useJobSelection.ts`). The table repolls every 3 s and rows

@@ -23,11 +23,33 @@ written from this file — when you add an entry here, mirror it there
   never payloads), with a "delayed only" chip next to the status counts.
   Each row has its actions: promote all delayed, pause or resume, and drain
   (admin). The Delayed count links to that group's delayed jobs.
+- **Select several groups and act on all of them**: promote all delayed, pause,
+  resume or drain (admin) the selected groups at once, from a bar above the
+  groups table. Shift+click selects a range, as in the jobs table.
+- **"Promote all" previews before it runs.** The dialog first counts the
+  matching delayed jobs (`GET …/jobs/count-matching`, MCP `count_matching`)
+  and says how many will run.
+- **Spread over a window, instead of all at once (optional).** "Promote all"
+  can lay the matching jobs out evenly until a chosen time, keeping their
+  order and never postponing a job already due sooner. It is the gentle way
+  to bring a large batch forward without a spike on whatever the workers
+  call. API: `spread` on promote-matching; MCP: `spread_*` on
+  `promote_matching`. Redis only.
+- **`group:<id>` in the search box** filters by BullMQ Pro group, alone or
+  with text (`group:"id with spaces"` works too).
+- The demo simulator schedules campaigns whose jobs are all delayed, so the
+  public demo shows the Delayed column, the "delayed only" rows and the
+  spread option.
 
 ### Fixed
 
 - **Tooltips no longer wrap one word per line** inside narrow chips: they size
   to their text, up to the usual maximum width.
+- Promote-matching pages by score and id instead of by position, so jobs that
+  become due, or that it moves, while it runs neither shift nor repeat.
+- Simulator: the loop that re-arms the rate-limited demo group passed a jitter
+  of 60 000 (a fraction is expected), so its interval swung between 10 ms and
+  weeks.
 
 ## [0.7.1] — 2026-10-07
 
