@@ -84,6 +84,8 @@ const LOCAL_POSITION_TTL_MS = 15_000;
 const SAVE_DEBOUNCE_MS = 400;
 const GLIDE_MS = 520;
 const FIT_MS = 800;
+/** Smallest zoom auto-fit picks (see fitTargets). */
+const FIT_MIN_ZOOM = 0.5;
 const FRESH_MS = 2_500;
 
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
@@ -185,7 +187,10 @@ function MapCanvasInner({ mapId, maps, canOperate, onSelectMap, onDeleted }: Map
       const minY = Math.min(...pts.map((p) => p.y));
       const maxX = Math.max(...pts.map((p) => p.x + NODE_W));
       const maxY = Math.max(...pts.map((p) => p.y + NODE_H));
-      const vp = getViewportForBounds({ x: minX, y: minY, width: maxX - minX, height: maxY - minY }, el.clientWidth, el.clientHeight, 0.2, 1, 0.22);
+      // Auto-fit never shrinks below FIT_MIN_ZOOM: past that, queue names stop being
+      // readable, and a long flow that is centred and pannable beats a whole flow
+      // nobody can read. Zooming out by hand still goes down to the canvas minimum.
+      const vp = getViewportForBounds({ x: minX, y: minY, width: maxX - minX, height: maxY - minY }, el.clientWidth, el.clientHeight, FIT_MIN_ZOOM, 1, 0.08);
       void rf.setViewport(vp, { duration });
     },
     [rf],
