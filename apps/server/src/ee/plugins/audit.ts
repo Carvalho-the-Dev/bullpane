@@ -77,6 +77,7 @@ const ROUTE_ACTIONS: Record<string, AuditAction> = {
   "POST /api/connections/:id/queues/:queue/jobs/bulk/retry": "job.bulk_retry",
   "POST /api/connections/:id/queues/:queue/jobs/bulk/remove": "job.bulk_remove",
   "POST /api/connections/:id/queues/:queue/jobs/bulk/promote": "job.bulk_promote",
+  "POST /api/connections/:id/queues/:queue/jobs/promote-matching": "job.promote_matching",
   // queues
   "POST /api/connections/:id/queues/:queue/pause": "queue.pause",
   "POST /api/connections/:id/queues/:queue/resume": "queue.resume",

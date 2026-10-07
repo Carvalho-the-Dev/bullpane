@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ChevronLeft, Info, Layers, Pause, Play, Trash2 } from "lucide-react";
+import { ChevronLeft, FastForward, Info, Layers, Pause, Play, Trash2 } from "lucide-react";
 import { GROUP_STATUSES, type GroupStatus, type GroupSummary, type GroupsByStatus } from "@bullpane/shared";
 import { routes } from "@/lib/routes";
 import { cn } from "@/lib/cn";
@@ -19,6 +19,7 @@ import { Pagination } from "@/components/Pagination";
 import { JobsTable } from "@/components/JobsTable";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/Button";
+import { PromoteMatchingDialog } from "@/components/PromoteMatchingDialog";
 
 const STATUS_VARIANT: Record<GroupStatus, BadgeVariant> = {
   waiting: "info",
@@ -255,6 +256,7 @@ export function GroupJobsPage() {
       },
     );
   const noProApi = proApi ? undefined : "Needs BullMQ Pro's package installed next to Bullpane";
+  const [promoteOpen, setPromoteOpen] = useState(false);
 
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const run = (jobId: string, action: JobActionKind) =>
@@ -286,6 +288,9 @@ export function GroupJobsPage() {
               <Button size="sm" variant="secondary" leftIcon={<Play />} disabled={!proApi || groupAction.isPending} title={noProApi} onClick={() => runGroup("resume")}>
                 Resume group
               </Button>
+              <Button size="sm" variant="secondary" leftIcon={<FastForward />} disabled={!proApi} title={noProApi} onClick={() => setPromoteOpen(true)}>
+                Promote all delayed
+              </Button>
               {isAdmin && (
                 <Button size="sm" variant="danger" leftIcon={<Trash2 />} disabled={!proApi || groupAction.isPending} title={noProApi} onClick={() => setConfirmDrain(true)}>
                   Drain group
@@ -313,6 +318,7 @@ export function GroupJobsPage() {
           <Pagination page={page} pageSize={pageSize} total={jobs.data?.total ?? 0} count={jobs.data?.jobs.length} onPage={setPage} onPageSize={(s) => (setPageSize(s), setPage(1))} />
         </div>
       </div>
+      <PromoteMatchingDialog open={promoteOpen} onClose={() => setPromoteOpen(false)} connectionId={connectionId} queue={queue} match={{ groupId }} />
       <ConfirmDialog
         open={confirmDrain && proApi && isAdmin}
         onClose={() => setConfirmDrain(false)}

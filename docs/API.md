@@ -40,7 +40,7 @@ Pro column: the feature that gates the route (402 in free edition).
 | GET | /connections/:id/hidden-queues | viewer | | → `HiddenQueue[]` (queue name, when, who) |
 | POST | /connections/:id/hidden-queues | operator | | `hideQueueSchema` (`{ queueName }`) → `HiddenQueue[]` (201, idempotent) |
 | DELETE | /connections/:id/hidden-queues/:queueName | operator | | → `HiddenQueue[]` (idempotent) |
-| GET | /connections/:id/queues/:queue | viewer | | → `QueueSummary` (with `metrics`) |
+| GET | /connections/:id/queues/:queue | viewer | | → `QueueSummary` (with `metrics`, and on a BullMQ Pro queue with groups `groupWaiting`: jobs waiting inside groups, which `counts.waiting` does not include) |
 | GET | /connections/:id/queues/:queue/jobs | viewer | | `listJobsQuerySchema` → `JobsPage` |
 | GET | /connections/:id/queues/:queue/jobs/search | viewer | | `searchJobsQuerySchema` → `JobSearchResult` |
 | POST | /connections/:id/queues/:queue/jobs | operator | | `AddJobInput` → `{ id }` |
@@ -110,7 +110,8 @@ Notes
 | GET | /connections/:id/queues/:queue/jobs?groupId= | viewer | | when `groupId` is set the page comes from that Pro group's list and `state` is ignored |
 | GET | /connections/:id/queues/:queue/jobs/search?groupId= | viewer | | only jobs of that Pro group (exact id: the `gid` hash field, else `opts.group.id`); `q` may then be empty. The way to list a group's delayed, failed, completed or active jobs, which Pro keeps in the queue-wide state keys |
 | GET | /connections/:id/queues/:queue/groups | viewer | | → `GroupsResponse` (`GroupsPage` + `bullmqProApi`: BullMQ Pro's package is installed) |
-| POST | /connections/:id/queues/:queue/groups/:groupId/pause | operator | | `QueuePro.pauseGroup` → `{ ok }`; audited `group.pause` |
+| POST | /connections/:id/queues/:queue/groups/:groupId/pause | operator | | `QueuePro.pauseGroup` → `{ ok }`; audited `group.pause`. Works on a group Pro has not indexed yet (only delayed jobs): Pro records the pause and the jobs join it paused |
+| POST | /connections/:id/queues/:queue/jobs/promote-matching | operator | | `promoteMatchingSchema` (`query` and / or `groupId`, `cursor`) → `PromoteMatchingResult`. Promotes every delayed job that matches, past the 500-id bulk ceiling: at most `PROMOTE_MATCHING_LIMIT` (2000) per call, then `nextCursor`. Audited `job.promote_matching` with the group, the query (100 chars) and counts |
 | POST | /connections/:id/queues/:queue/groups/:groupId/resume | operator | | `QueuePro.resumeGroup` → `{ ok }`; audited `group.resume` |
 | POST | /connections/:id/queues/:queue/groups/:groupId/drain | admin | | `QueuePro.deleteGroup` (the group's waiting and prioritized jobs) → `{ ok }`; audited `group.drain` |
 
@@ -447,6 +448,6 @@ Scopes: `queues:read`, `queues:write` (a request for write; the consent screen d
 Tools: `list_connections`, `list_queues`, `get_queue`, `list_jobs`, `search_jobs`,
 `get_job`, `get_job_logs`, `list_schedulers`, `list_groups`, `request_destructive_action`
 (read); `add_job`, `retry_job`, `promote_job`, `remove_job`, `discard_job`,
-`bulk_job_action`, `retry_all`, `pause_queue`, `resume_queue`, `pause_group`, `resume_group`
+`bulk_job_action`, `promote_matching`, `retry_all`, `pause_queue`, `resume_queue`, `pause_group`, `resume_group`
 (write). Draining a group is `request_destructive_action` with `drain_group` and `group_id`:
 a link to the group page's confirmation dialog (`?confirm=drain`).

@@ -109,6 +109,7 @@ function fakeInspector() {
     retryJob: vi.fn(async () => undefined),
     removeJob: vi.fn(async () => undefined),
     pauseGroup: vi.fn(async () => undefined),
+    promoteMatching: vi.fn(async () => ({ matched: 1, promoted: 1, failed: [], failedCount: 0, scanned: 10, total: 10, nextCursor: null })),
     getJob: vi.fn(async (_q: string, id: string) => ({ id, name: "send-invoice", state: "failed", data: { invoice: 42 } })),
     searchJobs: vi.fn(async () => ({ jobs: [], nextCursor: null, scanned: 0, total: 0, skippedLargePayloads: 0 })),
   };
@@ -333,6 +334,17 @@ describe("MCP: who can do what", () => {
     expect(names.some((n) => /drain|obliterate|clean/.test(n) && n !== "request_destructive_action")).toBe(false);
     const res = await callTool(w, access_token, "request_destructive_action", { connection_id: "c1", queue: "payments", action: "drain" });
     expect(JSON.parse(res.content[0]!.text).url).toBe(`${PUBLIC_URL}/c/c1/q/payments?confirm=drain`);
+    await w.app.close();
+  });
+
+  it("promotes every delayed job of a group with promote_matching", async () => {
+    const w = await build({ ceiling: "write" });
+    const { access_token } = await connect(w, "op", "write");
+    const res = await callTool(w, access_token, "promote_matching", { connection_id: "c1", queue: "payments", group_id: "tenant-a" });
+    expect(res.isError).toBeUndefined();
+    expect(w.inspector.promoteMatching).toHaveBeenCalledWith("payments", { groupId: "tenant-a" }, { cursor: null, limit: expect.any(Number) });
+    const neither = await callTool(w, access_token, "promote_matching", { connection_id: "c1", queue: "payments" });
+    expect(neither.isError).toBe(true);
     await w.app.close();
   });
 

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowDownUp, BarChart3, Bell, CalendarClock, ChevronDown, Eraser, Flame, Layers, Pause, Play, Plus, RotateCcw, ScrollText, Search, Trash2, Unplug, X } from "lucide-react";
-import { BULK_JOB_LIMIT, JOB_STATES, type BulkJobAction, type BulkJobActionResult, type JobState, type JobSummary, type SchedulerPromoteMode } from "@bullpane/shared";
+import { ArrowDownUp, BarChart3, Bell, CalendarClock, ChevronDown, Eraser, FastForward, Flame, Layers, Pause, Play, Plus, RotateCcw, ScrollText, Search, Trash2, Unplug, X } from "lucide-react";
+import { BULK_JOB_LIMIT, GROUP_WAITING_CAP, JOB_STATES, type BulkJobAction, type BulkJobActionResult, type JobState, type JobSummary, type SchedulerPromoteMode } from "@bullpane/shared";
 import { cn } from "@/lib/cn";
 import { routes } from "@/lib/routes";
 import { formatNumber } from "@/lib/format";
 import { useHotkey } from "@/lib/useHotkey";
 import { STATE_COLORS } from "@/lib/stateColors";
-import { useBulkJobAction, useJobAction, useJobSearch, useJobs, useQueue, useQueueAction, type JobActionKind } from "@/api/hooks";
+import { useBulkJobAction, useGroupJobs, useJobAction, useJobSearch, useJobs, useQueue, useQueueAction, type JobActionKind } from "@/api/hooks";
 import { useJobSelection } from "@/lib/useJobSelection";
 import { BulkActionBar, BulkResultPanel, bulkActionsFor } from "@/components/BulkActionBar";
 import { errorMessage } from "@/api/client";
@@ -33,6 +33,8 @@ import { QueueSetupPanel } from "./QueueSetupPanel";
 import { SchedulersPanel } from "./SchedulersPanel";
 import { QueueAlerts, QueueAlertsPill, useQueueAlerts } from "@/ee/pages/queue/QueueAlerts";
 import { HIDE_HINT, HideIcon, useHideQueue } from "@/components/queues/hideQueue";
+import { GroupToolbar } from "./GroupToolbar";
+import { PromoteMatchingDialog } from "@/components/PromoteMatchingDialog";
 import { GroupCombobox } from "./GroupCombobox";
 import { PauseQueueDialog } from "@/components/queues/PauseQueueDialog";
 import { jobActionMessage } from "@/lib/jobActionMessage";
@@ -145,6 +147,8 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
   /** the jobs actually on screen — these are the ones "select all" acts on */
   const visibleJobs = scanning ? searchJobs : (jobs.data?.jobs ?? []);
   const visibleIds = useMemo(() => visibleJobs.map((j) => j.id), [visibleJobs]);
+  /** groups of the jobs on screen: the only way to offer a group whose jobs are all delayed */
+  const pageGroups = useMemo(() => [...new Set(visibleJobs.map((j) => j.groupId).filter((g): g is string => !!g))], [visibleJobs]);
   // Selection by jobId, not by index: the table repolls every 3 s and the rows
   // swap places. See lib/useJobSelection.ts.
   const selection = useJobSelection(visibleIds);
@@ -153,6 +157,7 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
   const [confirmBulk, setConfirmBulk] = useState<BulkJobAction | null>(null);
   const [confirmRemoveJob, setConfirmRemoveJob] = useState<string | null>(null);
   const [promoteScheduled, setPromoteScheduled] = useState<SchedulerJobRef | null>(null);
+  const [promoteMatchingOpen, setPromoteMatchingOpen] = useState(false);
 
   const [dialog, setDialog] = useState<null | "add" | "clean" | "drain" | "obliterate" | "retryAll" | "pause">(null);
   const [alertOpen, setAlertOpen] = useState(false);
@@ -202,6 +207,26 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
   useEffect(() => setDraft(q), [q]);
 
   const counts = summary.data?.counts;
+  // BullMQ Pro keeps a group's waiting jobs in the group's own list, not in `wait`,
+  // so counts.waiting is 0 on a queue full of grouped jobs. The waiting tab shows
+  // the group's total when filtered by one, else `wait` plus every group's jobs.
+  const groupWaitingTotal = useGroupJobs(connectionId, queue, groupId || undefined, { page: 1, pageSize: 1 }).data?.total;
+  const groupWaiting = summary.data?.groupWaiting;
+  const waitingTab = useMemo((): Pick<TabItem<StateTab>, "count" | "countSuffix" | "title"> => {
+    if (groupId) {
+      return { count: groupWaitingTotal ?? null, title: `Jobs waiting in group ${groupId} (its list and its prioritized jobs)` };
+    }
+    if (!groupWaiting || groupWaiting.jobs === 0) return { count: counts?.waiting ?? null };
+    const inWait = counts?.waiting ?? 0;
+    return {
+      count: inWait + groupWaiting.jobs,
+      countSuffix: groupWaiting.complete ? undefined : "+",
+      title:
+        `${formatNumber(inWait)} in the queue's wait list + ${formatNumber(groupWaiting.jobs)} waiting inside BullMQ Pro groups` +
+        (groupWaiting.complete ? "" : ` (the first ${formatNumber(GROUP_WAITING_CAP)} groups)`) +
+        ". Pick a group to list its jobs.",
+    };
+  }, [groupId, groupWaitingTotal, groupWaiting, counts?.waiting]);
   const tabs = useMemo<TabItem<StateTab>[]>(() => {
     const items: TabItem<StateTab>[] = [
       { value: "metrics", label: "Metrics", icon: <BarChart3 className="size-3.5" /> },
@@ -213,11 +238,12 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
         label: STATE_COLORS[s].label,
         count: counts?.[s] ?? null,
         tone: STATE_COLORS[s].dotClass,
+        ...(s === "waiting" ? waitingTab : {}),
       })),
     ];
     if (summary.data?.isPro) items.push({ value: "groups", label: "Groups", count: summary.data.groupsCount, icon: <Layers className="size-3.5 text-pro" /> });
     return items;
-  }, [counts, summary.data?.isPro, summary.data?.groupsCount, summary.data?.schedulersCount]);
+  }, [counts, waitingTab, summary.data?.isPro, summary.data?.groupsCount, summary.data?.schedulersCount]);
 
   const runSingle = (jobId: string, action: JobActionKind, scheduler?: SchedulerPromoteMode) => {
     jobAction.mutate(
@@ -492,7 +518,14 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
                 showing group <span className="font-mono text-fg">{groupId}</span>&apos;s {groupScan ? state : "waiting"} jobs
               </span>
             )}
-            <GroupCombobox connectionId={connectionId} queue={queue} value={groupId} onChange={(gid) => update({ group: gid || null, page: null })} />
+            <GroupCombobox
+              connectionId={connectionId}
+              queue={queue}
+              value={groupId}
+              onChange={(gid) => update({ group: gid || null, page: null })}
+              showWaiting={state === "waiting" || state === "prioritized"}
+              pageGroups={pageGroups}
+            />
           </div>
         )}
         {!scanning && !showingPanel && (
@@ -501,6 +534,8 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
           </Button>
         )}
       </div>
+
+      {isPro && groupId && !searching && !showingPanel && <GroupToolbar connectionId={connectionId} queue={queue} groupId={groupId} />}
 
       {/* Metrics, schedulers, or the job tables */}
       {showingSchedulers ? (
@@ -535,6 +570,11 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
                 )}
               </span>
               <span className="flex items-center gap-2">
+                {searching && state === "delayed" && isOperator && (
+                  <Button size="sm" variant="secondary" leftIcon={<FastForward />} onClick={() => setPromoteMatchingOpen(true)} title="Promote every delayed job that contains the search, not only the loaded ones">
+                    Promote all matches
+                  </Button>
+                )}
                 {search.hasNextPage && (
                   <Button size="sm" onClick={scanMore} loading={search.isFetchingNextPage}>
                     Scan more
@@ -613,7 +653,13 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
               jobs={jobs.data?.jobs}
               loading={jobs.isLoading}
               error={jobs.error}
-              emptyText={filteringByGroup ? `No waiting jobs in group ${groupId}` : "No jobs in this state"}
+              emptyText={
+                filteringByGroup
+                  ? `No waiting jobs in group ${groupId}`
+                  : state === "waiting" && (groupWaiting?.jobs ?? 0) > 0
+                    ? `The queue's wait list is empty: BullMQ Pro keeps ${formatNumber(groupWaiting?.jobs ?? 0)}${groupWaiting?.complete ? "" : "+"} waiting jobs inside groups. Pick a group above to list them.`
+                    : "No jobs in this state"
+              }
               canOperate={isOperator}
               onAction={onAction}
               pendingId={jobAction.isPending ? jobAction.variables?.jobId : null}
@@ -722,6 +768,9 @@ export function QueuePage({ view = "jobs" }: { view?: "jobs" | "metrics" | "sche
         loading={queueAction.isPending}
         onConfirm={() => runQueueAction({ action: "obliterate" }, `${queue} obliterated`)}
       />
+      {searching && (
+        <PromoteMatchingDialog open={promoteMatchingOpen} onClose={() => setPromoteMatchingOpen(false)} connectionId={connectionId} queue={queue} match={{ query: q.trim() }} />
+      )}
     </Page>
   );
 }

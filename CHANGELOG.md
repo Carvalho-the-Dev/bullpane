@@ -11,6 +11,39 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
+## [Unreleased]
+
+### Added
+
+- **Promote every delayed job of a group, or of a search.** "Promote all
+  delayed" on a group, and "Promote all matches" on a search in the delayed
+  tab, promote every matching job, not only the 500 that fit a selection.
+  Each server call is bounded (2000 promotions, a capped number of scan
+  slices) and returns a cursor; the dialog loops, counts and can stop between
+  calls. On a BullMQ Pro queue the jobs go back into their group. API:
+  `POST …/jobs/promote-matching`; MCP: `promote_matching`.
+- **Group actions on the queue page.** With a group filter on, a toolbar
+  pauses, resumes, promotes all delayed of, or drains that group, and links to
+  its page. That includes groups Pro has not indexed because all their jobs
+  are delayed, which the groups page cannot list: pausing one works and its
+  jobs join it paused.
+
+### Fixed
+
+- **The waiting count of a BullMQ Pro queue counts the jobs waiting in groups.**
+  Pro keeps a group's waiting jobs in the group's own list, not in the queue's
+  wait list, so a queue with thousands of grouped jobs showed "waiting 0". The
+  waiting tab now adds them, with a tooltip that splits the two and a "+" when
+  the sum stopped at 1000 groups. With a group filter it shows that group's
+  total. An empty wait list on a Pro queue says where the jobs are. The sum
+  costs two O(1) commands per group in the existing stats script, on the queue
+  page only.
+- **The group filter offers groups whose jobs are all delayed.** Pro only
+  indexes groups with jobs waiting, running, limited or paused, so the picker
+  never listed them, and it showed "N waiting" on every tab. Outside the waiting
+  tab it now lists the groups of the jobs on screen first ("on this page") and
+  hides the waiting counts.
+
 ## [0.6.2] — 2026-10-06
 
 ### Added
