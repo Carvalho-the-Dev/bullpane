@@ -10,12 +10,16 @@
  * bulk and cannot be undone, so the only thing the MCP does for them is hand
  * back a link that opens the confirmation dialog in the dashboard, where a human
  * reads the count and the queue name and clicks.
+ *
+ * Flow map tools let a client DRAW a process ("rule-items → sender-trigger →
+ * voice | whatsapp") for the team to see in the dashboard. They are drawings:
+ * they never touch Redis, and they need write access like every other change.
  */
-import { JOB_STATES } from "@bullpane/shared";
+import { flowMapNodeId, JOB_STATES } from "@bullpane/shared";
 import { z } from "zod";
 
 export interface ApiCall {
-  method: "GET" | "POST" | "DELETE";
+  method: "GET" | "POST" | "PATCH" | "DELETE";
   url: string;
   body?: unknown;
 }
@@ -64,6 +68,10 @@ export function textResult(value: unknown, isError = false): ToolResult {
 /** An /api answer as a tool result: errors become `isError` with the API's own message. */
 async function forward(ctx: ToolContext, req: ApiCall): Promise<ToolResult> {
   const { status, body } = await ctx.call(req);
+  return apiResult(status, body);
+}
+
+function apiResult(status: number, body: unknown): ToolResult {
   if (status >= 400) {
     const b = (body ?? {}) as { error?: string; message?: string };
     const hint =
@@ -94,6 +102,30 @@ const zConn = z.object({ connection_id: z.string().min(1) });
 const zQueue = zConn.extend({ queue: z.string().min(1) });
 const zJob = zQueue.extend({ job_id: z.string().min(1) });
 const zState = z.enum(JOB_STATES);
+const zMap = z.object({ map_id: z.string().min(1) });
+const mapPath = (a: { map_id: string }) => `/api/flow-maps/${seg(a.map_id)}`;
+
+/**
+ * The connection a flow map tool means when the client left connection_id out:
+ * the only one, when there is exactly one. With several, guessing would draw the
+ * wrong queue (the same name may exist on two connections), so the client is
+ * told to pass it.
+ */
+async function connectionOrDefault(ctx: ToolContext, given: string | undefined): Promise<{ id: string } | { error: ToolResult }> {
+  if (given) return { id: given };
+  const res = await ctx.call({ method: "GET", url: "/api/connections" });
+  if (res.status >= 400) return { error: apiResult(res.status, res.body) };
+  const list = Array.isArray(res.body) ? (res.body as Array<{ id: string; name: string }>) : [];
+  if (list.length === 1) return { id: (list[0] as { id: string }).id };
+  if (list.length === 0) return { error: textResult("validation: Bullpane has no connection yet; add one in the dashboard first.", true) };
+  const names = list.map((c) => `${c.name} (${c.id})`).join(", ");
+  return {
+    error: textResult(
+      `validation: connection_id is required: this installation has ${list.length} connections (${names}). Pass the connection of each queue; list_connections shows them.`,
+      true,
+    ),
+  };
+}
 
 const ro = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 const rw = (destructive: boolean, idempotent: boolean) => ({ readOnlyHint: false, destructiveHint: destructive, idempotentHint: idempotent, openWorldHint: false }) as const;
@@ -391,6 +423,166 @@ export const MCP_TOOLS: McpTool[] = [
     annotations: rw(false, true),
     schema: zQueue.extend({ group_id: z.string().min(1).max(200) }),
     run: (a, ctx) => forward(ctx, { method: "POST", url: `${queuePath(a)}/groups/${seg(a.group_id)}/resume` }),
+  }),
+
+  // ----- flow maps (Pro): drawings of a process, read and write -----
+  tool({
+    name: "list_flow_maps",
+    title: "List flow maps",
+    description:
+      "Lists the flow maps: named diagrams of the queues one process goes through. kind manual = drawn by people (nested by parentId, like folders); kind detected = computed, read-only, one per group of queues linked by BullMQ FlowProducer parents. Use get_flow_map for a map's queues, arrows and live counts.",
+    access: "read",
+    inputSchema: object({}, []),
+    annotations: ro,
+    schema: z.object({}),
+    run: (_a, ctx) => forward(ctx, { method: "GET", url: "/api/flow-maps" }),
+  }),
+  tool({
+    name: "get_flow_map",
+    title: "Get flow map",
+    description:
+      "One flow map: its queues (node id = connectionId:queueName) with live job counts, and its arrows (edges, from → to). source manual = drawn, with an edge id for remove_flow_edge; source detected = seen in BullMQ flows, not removable. missing: true means the queue was not found on its connection.",
+    access: "read",
+    inputSchema: object({ map_id: str("Flow map id, from list_flow_maps") }, ["map_id"]),
+    annotations: ro,
+    schema: zMap,
+    run: (a, ctx) => forward(ctx, { method: "GET", url: mapPath(a) }),
+  }),
+  tool({
+    name: "create_flow_map",
+    title: "Create flow map",
+    description:
+      "Creates an empty flow map to draw a process on. Then call add_flow_edge once per hop (work goes from_queue → to_queue): queues not on the map yet are added automatically, so the edges alone draw the whole process. Use add_flow_queue only for a queue with no arrow. parent_id nests it under another map.",
+    access: "write",
+    inputSchema: object(
+      { name: str("Map name, e.g. the process: Dispatch", { maxLength: 80 }), description: str("What the process does", { maxLength: 500 }), parent_id: str("Manual map to nest it under") },
+      ["name"],
+    ),
+    annotations: rw(false, false),
+    schema: z.object({ name: z.string().trim().min(1).max(80), description: z.string().max(500).optional(), parent_id: z.string().min(1).optional() }),
+    run: (a, ctx) => forward(ctx, { method: "POST", url: "/api/flow-maps", body: { name: a.name, description: a.description, parentId: a.parent_id } }),
+  }),
+  tool({
+    name: "update_flow_map",
+    title: "Rename or move flow map",
+    description: "Renames a manual flow map, changes its description, or moves it under another map (parent_id; null moves it to the top level). Detected maps are read-only: copy_flow_map them first.",
+    access: "write",
+    inputSchema: object(
+      {
+        map_id: str("Flow map id"),
+        name: str("New name", { maxLength: 80 }),
+        description: { type: ["string", "null"], description: "New description; null clears it" },
+        parent_id: { type: ["string", "null"], description: "Map to move it under; null = top level" },
+      },
+      ["map_id"],
+    ),
+    annotations: rw(false, true),
+    schema: zMap.extend({ name: z.string().trim().min(1).max(80).optional(), description: z.string().max(500).nullable().optional(), parent_id: z.string().min(1).nullable().optional() }),
+    run: (a, ctx) => forward(ctx, { method: "PATCH", url: mapPath(a), body: { name: a.name, description: a.description, parentId: a.parent_id } }),
+  }),
+  tool({
+    name: "delete_flow_map",
+    title: "Delete flow map",
+    description: "Deletes a manual flow map and its drawing. Only the drawing: no queue or job is touched. Maps nested under it move up one level.",
+    access: "write",
+    inputSchema: object({ map_id: str("Flow map id") }, ["map_id"]),
+    annotations: rw(true, true),
+    schema: zMap,
+    run: (a, ctx) => forward(ctx, { method: "DELETE", url: mapPath(a) }),
+  }),
+  tool({
+    name: "add_flow_queue",
+    title: "Add queue to flow map",
+    description:
+      "Puts a queue on a manual flow map. Idempotent. Not needed for queues that have an arrow: add_flow_edge adds both ends. The queue does not have to exist yet (it shows as missing). connection_id may be omitted when Bullpane has exactly one connection.",
+    access: "write",
+    inputSchema: object({ map_id: str("Flow map id"), queue: str("Queue name"), connection_id: str("Connection of the queue, from list_connections (optional with a single connection)") }, ["map_id", "queue"]),
+    annotations: rw(false, true),
+    schema: zMap.extend({ queue: z.string().min(1).max(255), connection_id: z.string().min(1).optional() }),
+    run: async (a, ctx) => {
+      const conn = await connectionOrDefault(ctx, a.connection_id);
+      if ("error" in conn) return conn.error;
+      return forward(ctx, { method: "POST", url: `${mapPath(a)}/nodes`, body: { connectionId: conn.id, queueName: a.queue } });
+    },
+  }),
+  tool({
+    name: "remove_flow_queue",
+    title: "Remove queue from flow map",
+    description: "Takes a queue off a manual flow map, with the drawn arrows touching it. Only the drawing: the queue itself is untouched. connection_id may be omitted when Bullpane has exactly one connection.",
+    access: "write",
+    inputSchema: object({ map_id: str("Flow map id"), queue: str("Queue name"), connection_id: str("Connection of the queue (optional with a single connection)") }, ["map_id", "queue"]),
+    annotations: rw(true, true),
+    schema: zMap.extend({ queue: z.string().min(1).max(255), connection_id: z.string().min(1).optional() }),
+    run: async (a, ctx) => {
+      const conn = await connectionOrDefault(ctx, a.connection_id);
+      if ("error" in conn) return conn.error;
+      return forward(ctx, { method: "DELETE", url: `${mapPath(a)}/nodes/${seg(flowMapNodeId({ connectionId: conn.id, queueName: a.queue }))}` });
+    },
+  }),
+  tool({
+    name: "add_flow_edge",
+    title: "Draw an arrow on a flow map",
+    description:
+      "Draws one hop of a process on a manual flow map: work goes from from_queue to to_queue (the producer side to the consumer side). Call it once per hop; queues not on the map yet are added automatically. Idempotent: drawing the same arrow again only updates its label. The two queues may be on different connections (another Redis, or Postgres): pass from_connection_id and to_connection_id. Each may be omitted only when Bullpane has exactly one connection.",
+    access: "write",
+    inputSchema: object(
+      {
+        map_id: str("Flow map id"),
+        from_queue: str("Queue the work comes from"),
+        to_queue: str("Queue the work goes to"),
+        label: str("Short text on the arrow, e.g. 'per item' or 'on failure'", { maxLength: 120 }),
+        from_connection_id: str("Connection of from_queue, from list_connections (optional with a single connection)"),
+        to_connection_id: str("Connection of to_queue (optional with a single connection)"),
+      },
+      ["map_id", "from_queue", "to_queue"],
+    ),
+    annotations: rw(false, true),
+    schema: zMap.extend({
+      from_queue: z.string().min(1).max(255),
+      to_queue: z.string().min(1).max(255),
+      label: z.string().max(120).optional(),
+      from_connection_id: z.string().min(1).optional(),
+      to_connection_id: z.string().min(1).optional(),
+    }),
+    run: async (a, ctx) => {
+      // Only resolve the default when an end actually omits its connection.
+      let fallback: Awaited<ReturnType<typeof connectionOrDefault>> | null = null;
+      const pick = async (given: string | undefined) => {
+        if (given) return { id: given };
+        fallback ??= await connectionOrDefault(ctx, undefined);
+        return fallback;
+      };
+      const from = await pick(a.from_connection_id);
+      if ("error" in from) return from.error;
+      const to = await pick(a.to_connection_id);
+      if ("error" in to) return to.error;
+      return forward(ctx, {
+        method: "POST",
+        url: `${mapPath(a)}/edges`,
+        body: { from: { connectionId: from.id, queueName: a.from_queue }, to: { connectionId: to.id, queueName: a.to_queue }, label: a.label },
+      });
+    },
+  }),
+  tool({
+    name: "remove_flow_edge",
+    title: "Remove an arrow from a flow map",
+    description: "Removes a drawn arrow (source manual) from a manual flow map; its edge id is in get_flow_map. The queues stay on the map. Detected arrows cannot be removed.",
+    access: "write",
+    inputSchema: object({ map_id: str("Flow map id"), edge_id: str("Edge id, from get_flow_map") }, ["map_id", "edge_id"]),
+    annotations: rw(true, true),
+    schema: zMap.extend({ edge_id: z.string().min(1) }),
+    run: (a, ctx) => forward(ctx, { method: "DELETE", url: `${mapPath(a)}/edges/${seg(a.edge_id)}` }),
+  }),
+  tool({
+    name: "copy_flow_map",
+    title: "Copy flow map",
+    description:
+      "Copies a flow map into a new manual one with the same queues and positions (and drawn arrows). This is how a detected map becomes editable; its detected arrows keep being shown live, they are not copied.",
+    access: "write",
+    inputSchema: object({ map_id: str("Flow map id to copy (manual or detected)"), name: str("Name of the copy (default: '<name> (copy)')", { maxLength: 80 }), parent_id: str("Manual map to nest the copy under") }, ["map_id"]),
+    annotations: rw(false, false),
+    schema: zMap.extend({ name: z.string().trim().min(1).max(80).optional(), parent_id: z.string().min(1).optional() }),
+    run: (a, ctx) => forward(ctx, { method: "POST", url: `${mapPath(a)}/copy`, body: { name: a.name, parentId: a.parent_id } }),
   }),
 
   // ----- destructive: a link, never an action -----

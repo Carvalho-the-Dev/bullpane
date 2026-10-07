@@ -11,6 +11,23 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
+## [Unreleased]
+
+### Added
+
+- **Flow maps (Pro).** Name a process and draw the queues it goes through:
+  "Dispatch" is rule-items → sender-trigger → voice | whatsapp, with live
+  counts on every queue. A map may cross connections (one Redis to another,
+  Redis to Postgres), maps nest like folders, and the positions the team drags
+  are saved for everyone. Queues linked by BullMQ's FlowProducer show up as
+  detected maps, read-only and rooted at the parent queue; copy one to edit it.
+  A queue that disappears or a connection that is down is drawn as missing,
+  never an error. API: `/flow-maps`; MCP: `list_flow_maps`, `get_flow_map`,
+  `create_flow_map`, `update_flow_map`, `delete_flow_map`, `add_flow_queue`,
+  `remove_flow_queue`, `add_flow_edge`, `remove_flow_edge`, `copy_flow_map`,
+  so an AI client can draw a process from your code ("call `add_flow_edge` for
+  each hop").
+
 ## [0.6.3] — 2026-10-07
 
 ### Added

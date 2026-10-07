@@ -133,12 +133,25 @@ const ROUTE_ACTIONS: Record<string, AuditAction> = {
  *                                  under which label); no queue, job or access
  *                                  changes. Not in the action enum either.
  *  - POST/DELETE /api/flow-edges : same, a drawing on the graph.
+ *  - POST/PATCH/PUT/DELETE /api/flow-maps* : same, named drawings of a process
+ *                                  (which queues, where they sit, the arrows).
+ *                                  Listed below so they do not warn as unmapped.
  */
 const UNAUDITED = new Set([
   "POST /api/connections/test",
   "POST /api/setup",
   "POST /api/alerts/:id/test",
   "POST /api/license/refresh",
+  "POST /api/flow-maps",
+  "PATCH /api/flow-maps/:id",
+  "DELETE /api/flow-maps/:id",
+  "POST /api/flow-maps/:id/nodes",
+  "DELETE /api/flow-maps/:id/nodes/:nodeId",
+  "PUT /api/flow-maps/:id/layout",
+  "POST /api/flow-maps/:id/edges",
+  "PATCH /api/flow-maps/:id/edges/:edgeId",
+  "DELETE /api/flow-maps/:id/edges/:edgeId",
+  "POST /api/flow-maps/:id/copy",
 ]);
 
 export function actionFor(method: string, routePattern: string | undefined): AuditAction | null {

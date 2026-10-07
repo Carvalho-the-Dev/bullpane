@@ -580,6 +580,52 @@ per refresh, bounded and cached. Plain "worker of A calls B.add()" cannot be obs
 Redis without instrumenting the producer, so those edges are drawn manually and stored in
 MySQL. Both kinds render on the same graph, styled differently.
 
+## Flow maps (Pro)
+
+A flow map is a named diagram of the queues ONE process goes through
+("Dispatch": rule-items → sender-trigger → voice | whatsapp), drawn in the
+dashboard or by an MCP client (`create_flow_map`, then `add_flow_edge` per hop).
+Contract in API.md "Flow maps"; code in `ee/services/flowMaps.ts`.
+
+**Why maps reference queues instead of reusing folders.** A folder says whose a
+queue is (Payments, Notifications); a flow says where work goes, and one process
+crosses several folders. A queue belongs to one folder but appears in many flows,
+so a map *references* queues (`flow_map_nodes`) instead of owning them. Maps
+still nest like folders (`parent_id`), but each has its own diagram: a parent
+does not merge its children's. Deleting a map moves its children to its parent,
+the same promise folders make. See `migrations/mysql/0011_flow_maps.sql`.
+
+**A node is connection + queue** (`${connectionId}:${queueName}`; connection ids
+never contain `:`, queue names may, so ids split on the first one). One map may
+cross connections: `whatsapp-messenger` on the events Redis →
+`process-batch-whatsapp-cloud-api` on the AI Redis → `archive` on Postgres. The
+same queue name on two connections is two nodes, and edge idempotency is on the
+full refs. No foreign key to `connections` (queues are discovered strings, not
+rows): `ConnectionsService.remove()` deletes that connection's nodes and every
+edge touching them, leaving the other side of each map in place.
+
+**Detected maps** are computed, never stored. Per connection, the same sampled
+`child → parent` edges as Flow detection (one cache, 30 s, shared with the
+`/flows` page) are split into connected components, direction ignored; each
+component of 2+ queues is a map rooted at the queue no edge leaves (the
+FlowProducer parent at the top; ties: most incoming evidence, then name), with id
+`detected:<connectionId>:<root>`. They are read-only (`409
+detected_map_read_only`); `copy` turns one into a manual map with the same
+queues, on which the detected edges keep being drawn live rather than copied.
+A list waits at most 3 s for a connection's first sample; past that, or when a
+connection is down, the list answers without it and says
+`detectedComplete: false`, while the sample keeps filling the cache.
+
+**Cost of one map read.** Per connection on the map: the cached queue discovery,
+ONE `getQueueStats` pipeline for only the queues on the map that were discovered,
+and the cached detected edges (filtered to edges whose both ends are on the map).
+No scan per node, no per-node round trip. A queue that is not discovered, or a
+connection that is down or deleted, is a node with `missing: true` and empty
+counts: a map is a drawing first and never answers 5xx because part of it is
+gone. The detection sample itself costs what Flow detection costs, amortised over
+the 30 s cache. Map writes are not audited (like `/flow-edges` and folders): they
+change a drawing, not a queue, a job or an access.
+
 ## BullMQ Pro
 
 Pro queues share the standard key layout and add group keys under `${prefix}:${queue}:groups*`.

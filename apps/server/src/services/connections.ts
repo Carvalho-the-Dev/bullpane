@@ -16,10 +16,20 @@ import {
   type UpdateConnectionInput,
 } from "@bullpane/shared";
 import type { Inspector, InspectorPool, PingResult } from "@bullpane/redis-inspector";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Db } from "../db";
-import { alerts, connections, type ConnectionRow, flowEdges, folderQueues, hiddenQueues, users } from "../db/schema";
+import {
+  alerts,
+  connections,
+  type ConnectionRow,
+  flowEdges,
+  flowMapEdges,
+  flowMapNodes,
+  folderQueues,
+  hiddenQueues,
+  users,
+} from "../db/schema";
 import { notFound, validation } from "../plugins/errors";
 import { withRedis } from "./inspector-errors";
 
@@ -203,6 +213,10 @@ export class ConnectionsService {
     await this.db.delete(hiddenQueues).where(eq(hiddenQueues.connectionId, id));
     await this.db.delete(alerts).where(eq(alerts.connectionId, id));
     await this.db.delete(flowEdges).where(eq(flowEdges.connectionId, id));
+    // Flow maps span connections: only this side's queues leave the maps, and
+    // with them every edge that touched them (from or to). The maps stay.
+    await this.db.delete(flowMapEdges).where(or(eq(flowMapEdges.fromConnectionId, id), eq(flowMapEdges.toConnectionId, id)));
+    await this.db.delete(flowMapNodes).where(eq(flowMapNodes.connectionId, id));
     await this.db.delete(connections).where(eq(connections.id, id));
   }
 

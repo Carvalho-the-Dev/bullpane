@@ -15,6 +15,8 @@ import { withRedis } from "../../services/inspector-errors";
 
 export const FLOW_CACHE_TTL_MS = 30_000;
 export const FLOW_CONCURRENCY = 5;
+/** Jobs sampled per queue when the caller does not say (the /flows page default, and every flow map read). */
+export const DEFAULT_FLOW_SAMPLE = 200;
 
 interface DetectedGraph {
   nodes: FlowNode[];
@@ -80,6 +82,15 @@ export class FlowsService {
       edges: [...detected.edges, ...manual],
       sampledJobs: detected.sampledJobs,
     };
+  }
+
+  /**
+   * The detected (FlowProducer) edges of one connection, from the same 30 s
+   * cache as getGraph, so flow maps and the /flows page share one sample.
+   * Edge ends are queue names. Rejects when the connection is down.
+   */
+  async detectedEdges(row: ConnectionRow, sample = DEFAULT_FLOW_SAMPLE): Promise<FlowEdge[]> {
+    return (await this.detected(row, sample)).edges;
   }
 
   invalidate(connectionId: string): void {

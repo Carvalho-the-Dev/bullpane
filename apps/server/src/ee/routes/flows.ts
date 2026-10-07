@@ -3,10 +3,11 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireAuth, requireRole } from "../../auth/guards";
 import { requireFeature } from "../../plugins/gates";
+import { DEFAULT_FLOW_SAMPLE } from "../services/flows";
 
 type IdParams = { Params: { id: string } };
 
-const flowsQuerySchema = z.object({ sample: z.coerce.number().int().min(10).max(2000).default(200) });
+const flowsQuerySchema = z.object({ sample: z.coerce.number().int().min(10).max(2000).default(DEFAULT_FLOW_SAMPLE) });
 
 export async function flowRoutes(app: FastifyInstance): Promise<void> {
   // Auth first (401), then the pro gate (402), then the role (403) — see docs/API.md.
