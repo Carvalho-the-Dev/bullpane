@@ -35,6 +35,9 @@ export let settings = mysqlSchema.settings;
 export let mcpClients = mysqlSchema.mcpClients;
 export let mcpAuthCodes = mysqlSchema.mcpAuthCodes;
 export let mcpGrants = mysqlSchema.mcpGrants;
+export let flowMaps = mysqlSchema.flowMaps;
+export let flowMapNodes = mysqlSchema.flowMapNodes;
+export let flowMapEdges = mysqlSchema.flowMapEdges;
 
 let current: Dialect = "mysql";
 
@@ -59,6 +62,9 @@ export function useSchema(dialect: Dialect): void {
   mcpClients = s.mcpClients;
   mcpAuthCodes = s.mcpAuthCodes;
   mcpGrants = s.mcpGrants;
+  flowMaps = s.flowMaps;
+  flowMapNodes = s.flowMapNodes;
+  flowMapEdges = s.flowMapEdges;
   current = dialect;
 }
 
@@ -68,6 +74,9 @@ export type {
   AuditLogRow,
   ConnectionRow,
   FlowEdgeRow,
+  FlowMapEdgeRow,
+  FlowMapNodeRow,
+  FlowMapRow,
   FolderQueueRow,
   FolderRow,
   HiddenQueueRow,

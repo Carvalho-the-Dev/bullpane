@@ -1823,6 +1823,135 @@ export const createFlowEdgeSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Flow maps (Pro, feature "flows")
+//
+// A flow map is a named diagram of the queues ONE process goes through
+// ("Dispatch": rule-items → sender-trigger → voice | whatsapp), drawn by a
+// person or by an MCP client. Maps nest like folders (optional: a map at the
+// root is fine) but each map has its own diagram; a parent does not merge its
+// children's. A node is "connection + queue", so one map may span several
+// Redis/Postgres connections, and a queue may appear in many maps.
+//
+// Detected maps are computed, read-only: each connected group of queues that
+// BullMQ's FlowProducer links (the `parent` field on child jobs) becomes one,
+// named after the queue every edge leads to. Detected edges are also drawn on
+// manual maps whenever both of their queues are on the map.
+// ---------------------------------------------------------------------------
+
+/** A queue on a map. The node id is `${connectionId}:${queueName}` (connection ids never contain ":"). */
+export interface FlowMapNodeRef {
+  connectionId: string;
+  queueName: string;
+}
+
+export function flowMapNodeId(ref: FlowMapNodeRef): string {
+  return `${ref.connectionId}:${ref.queueName}`;
+}
+
+export interface FlowMapNode extends FlowMapNodeRef {
+  id: string;
+  /** Saved position on the canvas, shared by the team. null = never placed: the UI lays it out. */
+  x: number | null;
+  y: number | null;
+  connectionName: string;
+  /** Live counts; EMPTY_COUNTS when the queue is not discovered or the connection is down. */
+  counts: QueueCounts;
+  isPaused: boolean;
+  /** The queue was not found on its connection (renamed, not created yet, connection deleted or down). */
+  missing: boolean;
+}
+
+export interface FlowMapEdge {
+  /** manual: the row id; detected: `d:${fromNodeId}->${toNodeId}` */
+  id: string;
+  /** node ids */
+  from: string;
+  to: string;
+  source: "manual" | "detected";
+  label: string | null;
+  /** detected only: sampled jobs that evidenced the edge */
+  evidence: number;
+}
+
+export type FlowMapKind = "manual" | "detected";
+
+export interface FlowMapSummary {
+  /** manual: a nanoid; detected: `detected:${connectionId}:${rootQueue}` */
+  id: string;
+  kind: FlowMapKind;
+  name: string;
+  description: string | null;
+  /** manual only; detected maps are always at the root of their connection's section */
+  parentId: string | null;
+  position: number;
+  /** detected only: the connection the FlowProducer flow lives on */
+  connectionId: string | null;
+  nodeCount: number;
+  edgeCount: number;
+}
+
+export interface FlowMap extends FlowMapSummary {
+  nodes: FlowMapNode[];
+  edges: FlowMapEdge[];
+}
+
+export interface FlowMapsResponse {
+  maps: FlowMapSummary[];
+  /** false while detection is still sampling a connection (big keyspace) or a connection is down */
+  detectedComplete: boolean;
+}
+
+export const flowMapNodeRefSchema = z.object({
+  connectionId: z.string().min(1).max(64),
+  queueName: z.string().min(1).max(255),
+});
+
+export const createFlowMapSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  description: z.string().max(500).nullable().optional(),
+  parentId: z.string().nullable().optional(),
+});
+export type CreateFlowMapInput = z.infer<typeof createFlowMapSchema>;
+
+export const updateFlowMapSchema = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  description: z.string().max(500).nullable().optional(),
+  /** null moves the map to the root */
+  parentId: z.string().nullable().optional(),
+  position: z.number().int().min(0).optional(),
+});
+export type UpdateFlowMapInput = z.infer<typeof updateFlowMapSchema>;
+
+/** Idempotent: adding a queue that is already on the map updates its position if one is given. */
+export const addFlowMapNodeSchema = flowMapNodeRefSchema.extend({
+  x: z.number().finite().nullable().optional(),
+  y: z.number().finite().nullable().optional(),
+});
+export type AddFlowMapNodeInput = z.infer<typeof addFlowMapNodeSchema>;
+
+/** Saves where the team dragged the queues. Unknown node ids are ignored. */
+export const saveFlowMapLayoutSchema = z.object({
+  positions: z
+    .array(z.object({ nodeId: z.string().min(1).max(320), x: z.number().finite(), y: z.number().finite() }))
+    .max(2000),
+});
+export type SaveFlowMapLayoutInput = z.infer<typeof saveFlowMapLayoutSchema>;
+
+/**
+ * An arrow "work goes from `from` to `to`". Either end not on the map yet is
+ * added to it, so one call draws "rule-items → sender-trigger" from scratch.
+ * Idempotent on (from, to): drawing it again only updates the label.
+ */
+export const createFlowMapEdgeSchema = z.object({
+  from: flowMapNodeRefSchema,
+  to: flowMapNodeRefSchema,
+  label: z.string().max(120).nullable().optional(),
+});
+export type CreateFlowMapEdgeInput = z.infer<typeof createFlowMapEdgeSchema>;
+
+export const updateFlowMapEdgeSchema = z.object({ label: z.string().max(120).nullable() });
+
+// ---------------------------------------------------------------------------
 // Job tree (parent/child of ONE flow instance) — free edition
 // ---------------------------------------------------------------------------
 

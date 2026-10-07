@@ -226,6 +226,57 @@ export const flowEdges = mysqlTable(
   (t) => [uniqueIndex("flow_edges_unique").on(t.connectionId, t.fromQueue, t.toQueue)],
 );
 
+/**
+ * Flow maps (Pro) — see migrations/mysql/0011_flow_maps.sql. A map is a named
+ * diagram; nodes reference "connection + queue" (no FK: queues are discovered
+ * strings, and ConnectionsService.remove() deletes a connection's nodes and
+ * edges explicitly, as it does for folders).
+ */
+export const flowMaps = mysqlTable(
+  "flow_maps",
+  {
+    id: id(),
+    name: varchar("name", { length: 80 }).notNull(),
+    description: varchar("description", { length: 500 }),
+    parentId: varchar("parent_id", { length: 36 }),
+    position: int("position").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: datetime("updated_at", { mode: "date", fsp: 3 }).notNull(),
+  },
+  (t) => [index("flow_maps_parent_id_idx").on(t.parentId)],
+);
+
+export const flowMapNodes = mysqlTable(
+  "flow_map_nodes",
+  {
+    mapId: varchar("map_id", { length: 36 }).notNull(),
+    connectionId: varchar("connection_id", { length: 36 }).notNull(),
+    queueName: varchar("queue_name", { length: 255 }).notNull(),
+    x: double("x"),
+    y: double("y"),
+  },
+  (t) => [primaryKey({ columns: [t.mapId, t.connectionId, t.queueName] }), index("flow_map_nodes_connection_idx").on(t.connectionId)],
+);
+
+export const flowMapEdges = mysqlTable(
+  "flow_map_edges",
+  {
+    id: id(),
+    mapId: varchar("map_id", { length: 36 }).notNull(),
+    fromConnectionId: varchar("from_connection_id", { length: 36 }).notNull(),
+    fromQueue: varchar("from_queue", { length: 255 }).notNull(),
+    toConnectionId: varchar("to_connection_id", { length: 36 }).notNull(),
+    toQueue: varchar("to_queue", { length: 255 }).notNull(),
+    label: varchar("label", { length: 120 }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("flow_map_edges_unique").on(t.mapId, t.fromConnectionId, t.fromQueue, t.toConnectionId, t.toQueue),
+    index("flow_map_edges_from_conn_idx").on(t.fromConnectionId),
+    index("flow_map_edges_to_conn_idx").on(t.toConnectionId),
+  ],
+);
+
 /** MCP OAuth — see migrations/mysql/0009_mcp.sql for why there is no access-token table. */
 export const mcpClients = mysqlTable(
   "mcp_clients",
@@ -295,6 +346,9 @@ export type HiddenQueueRow = typeof hiddenQueues.$inferSelect;
 export type AlertRow = typeof alerts.$inferSelect;
 export type AlertEventRow = typeof alertEvents.$inferSelect;
 export type FlowEdgeRow = typeof flowEdges.$inferSelect;
+export type FlowMapRow = typeof flowMaps.$inferSelect;
+export type FlowMapNodeRow = typeof flowMapNodes.$inferSelect;
+export type FlowMapEdgeRow = typeof flowMapEdges.$inferSelect;
 export type AuditLogRow = typeof auditLog.$inferSelect;
 export type McpClientRow = typeof mcpClients.$inferSelect;
 export type McpAuthCodeRow = typeof mcpAuthCodes.$inferSelect;

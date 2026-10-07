@@ -245,6 +245,52 @@ export const settings = sqliteTable("settings", {
   value: text("value").notNull(),
 });
 
+/** Flow maps (Pro) — see migrations/sqlite/0004_flow_maps.sql and schema.mysql.ts. */
+export const flowMaps = sqliteTable(
+  "flow_maps",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    description: text("description"),
+    parentId: text("parent_id"),
+    position: integer("position").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (t) => [index("flow_maps_parent_id_idx").on(t.parentId)],
+);
+
+export const flowMapNodes = sqliteTable(
+  "flow_map_nodes",
+  {
+    mapId: text("map_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    queueName: text("queue_name").notNull(),
+    x: real("x"),
+    y: real("y"),
+  },
+  (t) => [primaryKey({ columns: [t.mapId, t.connectionId, t.queueName] }), index("flow_map_nodes_connection_idx").on(t.connectionId)],
+);
+
+export const flowMapEdges = sqliteTable(
+  "flow_map_edges",
+  {
+    id: id(),
+    mapId: text("map_id").notNull(),
+    fromConnectionId: text("from_connection_id").notNull(),
+    fromQueue: text("from_queue").notNull(),
+    toConnectionId: text("to_connection_id").notNull(),
+    toQueue: text("to_queue").notNull(),
+    label: text("label"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("flow_map_edges_unique").on(t.mapId, t.fromConnectionId, t.fromQueue, t.toConnectionId, t.toQueue),
+    index("flow_map_edges_from_conn_idx").on(t.fromConnectionId),
+    index("flow_map_edges_to_conn_idx").on(t.toConnectionId),
+  ],
+);
+
 // --- drift guard -----------------------------------------------------------
 // The server codes against the MySQL row types. If a column is added, renamed
 // or retyped on one side only, one of these lines stops compiling.
@@ -284,4 +330,10 @@ export type _DriftGuard = [
   Assert<Same<Insert<typeof mcpAuthCodes>, Insert<typeof mysql.mcpAuthCodes>>>,
   Assert<Same<Row<typeof mcpGrants>, Row<typeof mysql.mcpGrants>>>,
   Assert<Same<Insert<typeof mcpGrants>, Insert<typeof mysql.mcpGrants>>>,
+  Assert<Same<Row<typeof flowMaps>, Row<typeof mysql.flowMaps>>>,
+  Assert<Same<Insert<typeof flowMaps>, Insert<typeof mysql.flowMaps>>>,
+  Assert<Same<Row<typeof flowMapNodes>, Row<typeof mysql.flowMapNodes>>>,
+  Assert<Same<Insert<typeof flowMapNodes>, Insert<typeof mysql.flowMapNodes>>>,
+  Assert<Same<Row<typeof flowMapEdges>, Row<typeof mysql.flowMapEdges>>>,
+  Assert<Same<Insert<typeof flowMapEdges>, Insert<typeof mysql.flowMapEdges>>>,
 ];

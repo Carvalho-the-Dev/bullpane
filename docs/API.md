@@ -451,3 +451,62 @@ Tools: `list_connections`, `list_queues`, `get_queue`, `list_jobs`, `search_jobs
 `bulk_job_action`, `promote_matching`, `retry_all`, `pause_queue`, `resume_queue`, `pause_group`, `resume_group`
 (write). Draining a group is `request_destructive_action` with `drain_group` and `group_id`:
 a link to the group page's confirmation dialog (`?confirm=drain`).
+
+## Flow maps (Pro, feature `flows`)
+
+Named diagrams of the queues one process goes through. Types and zod schemas in
+`@bullpane/shared` (`FlowMap*`, `createFlowMapSchema`, …). A node id is
+`${connectionId}:${queueName}`. Auth → `requireFeature("flows")` → role, like
+the other Pro routes. Not audited: maps are drawings, like `/flow-edges`.
+
+| Method | Path | Role | Body / query | Response |
+|---|---|---|---|---|
+| GET | /flow-maps | viewer | | `FlowMapsResponse`: every manual map (tree order: `parentId`, `position`) and every detected map of every connection |
+| POST | /flow-maps | operator | `createFlowMapSchema` | `FlowMap` (201). 404 when `parentId` does not exist |
+| GET | /flow-maps/:id | viewer | | `FlowMap` with live counts. Manual id, or a detected id `detected:<connectionId>:<rootQueue>` |
+| PATCH | /flow-maps/:id | operator | `updateFlowMapSchema` | `FlowMap`. 409 when moving a map under itself or one of its descendants |
+| DELETE | /flow-maps/:id | operator | | `{ ok }`. Its children move to its parent (the root if it had none); its nodes and edges are deleted |
+| POST | /flow-maps/:id/nodes | operator | `addFlowMapNodeSchema` | `FlowMap`. Idempotent. 404 when the connection does not exist |
+| DELETE | /flow-maps/:id/nodes/:nodeId | operator | | `FlowMap`. Also deletes the manual edges touching it |
+| PUT | /flow-maps/:id/layout | operator | `saveFlowMapLayoutSchema` | `{ ok }`. Unknown node ids are ignored |
+| POST | /flow-maps/:id/edges | operator | `createFlowMapEdgeSchema` | `FlowMap` (201). Adds missing ends as nodes. Idempotent on (from, to): updates the label. 409 when from = to |
+| PATCH | /flow-maps/:id/edges/:edgeId | operator | `updateFlowMapEdgeSchema` | `FlowMap` |
+| DELETE | /flow-maps/:id/edges/:edgeId | operator | | `FlowMap` |
+| POST | /flow-maps/:id/copy | operator | `{ name?, parentId? }` | `FlowMap` (201): a new manual map with the same nodes (and positions); works on detected and manual maps. Detected edges keep being drawn on it, they are not copied as manual ones |
+
+Every write on a detected map other than `copy` answers `409 detected_map_read_only`.
+
+**Detected maps.** Per connection, from the same sampled edges as
+`GET /connections/:id/flows` (cached 30 s): the connected components of the
+detected edges (direction ignored), one map per component of 2+ queues. Its
+root is the queue no edge leaves (the FlowProducer parent at the top); with
+several, the one with the most incoming evidence, then by name. Name = the root
+queue. A connection that is down or still sampling contributes nothing and sets
+`detectedComplete: false`.
+
+**Building a map's graph.** Counts come from one `getQueueStats` call per
+connection on the map (only the queues on it), and detected edges from that
+connection's cached sample, filtered to edges whose both ends are on the map.
+A queue that is not discovered, or a connection that is down or deleted, gives
+a node with `missing: true` and empty counts, never a 5xx.
+
+**Connection deleted.** `ConnectionsService.remove()` deletes its nodes and the
+edges touching them on every map.
+
+### MCP tools
+
+All forward to the routes above with the caller's grant, like the other tools.
+`connection_id` may be omitted when the installation has exactly one connection.
+
+| Tool | Access | Route |
+|---|---|---|
+| `list_flow_maps` | read | GET /flow-maps |
+| `get_flow_map` (`map_id`) | read | GET /flow-maps/:id |
+| `create_flow_map` (`name`, `description?`, `parent_id?`) | write | POST /flow-maps |
+| `update_flow_map` (`map_id`, `name?`, `description?`, `parent_id?`) | write | PATCH /flow-maps/:id |
+| `delete_flow_map` (`map_id`) | write | DELETE /flow-maps/:id |
+| `add_flow_queue` (`map_id`, `queue`, `connection_id?`) | write | POST /flow-maps/:id/nodes |
+| `remove_flow_queue` (`map_id`, `queue`, `connection_id?`) | write | DELETE /flow-maps/:id/nodes/:nodeId |
+| `add_flow_edge` (`map_id`, `from_queue`, `to_queue`, `label?`, `from_connection_id?`, `to_connection_id?`) | write | POST /flow-maps/:id/edges |
+| `remove_flow_edge` (`map_id`, `edge_id`) | write | DELETE /flow-maps/:id/edges/:edgeId |
+| `copy_flow_map` (`map_id`, `name?`, `parent_id?`) | write | POST /flow-maps/:id/copy |
