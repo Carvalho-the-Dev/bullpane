@@ -657,6 +657,14 @@ against `@taskforcesh/bullmq-pro` 7.48.0. The facts that shape the reader:
   at `GROUP_WAITING_CAP` (1000) groups and flagged `complete: false` past it. Lists of
   queues (overview, sidebar) do not pay for it. With a group filter the waiting tab shows
   that group's own total.
+- The groups page lists what Pro indexes, which excludes every group whose jobs are all
+  delayed: often exactly the groups an operator wants to act on. The groups table therefore
+  has a Delayed column and "delayed only" rows, from `getDelayedGroups.lua`: a bounded slice
+  of `delayed` per call (soonest first), one HMGET of the group fields and opts per job,
+  counts and soonest run per group. The UI chains up to 10 calls and sums them (a "+" while
+  part of the state is unscanned). "Delayed only" means not among the first 200 indexed
+  groups, which the page reads to tell them apart; they are listed after the indexed
+  groups, on the last page.
 
 Reads are read-only, one EVALSHA per page (`getGroups.lua`). The simulator writes the same
 layout so the demo shows groups without needing a Pro token.

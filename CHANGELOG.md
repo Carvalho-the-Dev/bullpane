@@ -11,6 +11,24 @@ The public page at [bullpane.com/changelog](https://bullpane.com/changelog) is
 written from this file — when you add an entry here, mirror it there
 (`apps/website/public/changelog.html`).
 
+## [Unreleased]
+
+### Added
+
+- **The groups page lists the groups with delayed jobs, in the same table.**
+  BullMQ Pro indexes no group whose jobs are all delayed, so the groups page
+  never showed them, though they are often the ones to act on. The table gains
+  a Delayed column for every group and rows with the status "delayed only" for
+  those, filled by a bounded scan of the delayed state (group fields only,
+  never payloads), with a "delayed only" chip next to the status counts.
+  Each row has its actions: promote all delayed, pause or resume, and drain
+  (admin). The Delayed count links to that group's delayed jobs.
+
+### Fixed
+
+- **Tooltips no longer wrap one word per line** inside narrow chips: they size
+  to their text, up to the usual maximum width.
+
 ## [0.7.1] — 2026-10-07
 
 ### Fixed

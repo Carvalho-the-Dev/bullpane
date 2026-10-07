@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronLeft, FastForward, Info, Layers, Pause, Play, Trash2 } from "lucide-react";
 import { GROUP_STATUSES, type GroupStatus, type GroupSummary, type GroupsByStatus } from "@bullpane/shared";
@@ -20,6 +20,7 @@ import { JobsTable } from "@/components/JobsTable";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/Button";
 import { PromoteMatchingDialog } from "@/components/PromoteMatchingDialog";
+import { useDelayedGroupCounts } from "./useDelayedGroupCounts";
 
 const STATUS_VARIANT: Record<GroupStatus, BadgeVariant> = {
   waiting: "info",
@@ -40,12 +41,74 @@ const WORKER_DEFAULT_HINT = "No per-group override in Redis. The worker's own gr
 export function GroupsPage() {
   const { connectionId = "", queue = "" } = useParams();
   const navigate = useNavigate();
+  const { isOperator, isAdmin } = useAuth();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const summary = useQueue(connectionId, queue);
   const groups = useGroups(connectionId, queue, { page, pageSize });
+  // Every indexed id (first 200), to tell "delayed only" groups from indexed ones on other pages.
+  const indexed = useGroups(connectionId, queue, { page: 1, pageSize: 200 });
+  const delayed = useDelayedGroupCounts(connectionId, queue, (summary.data?.counts.delayed ?? 0) > 0);
+  const groupAction = useGroupAction(connectionId, queue);
+  const [promoteGroup, setPromoteGroup] = useState<string | null>(null);
+  const [drainGroup, setDrainGroup] = useState<string | null>(null);
   const now = useNow(1000);
-  const cols = 6;
+  const proApi = groups.data?.bullmqProApi ?? false;
+  const showActions = isOperator;
+  const cols = 7 + (showActions ? 1 : 0);
+
+  const indexedIds = useMemo(() => new Set(indexed.data?.groups.map((g) => g.id) ?? []), [indexed.data]);
+  /** groups whose jobs are all delayed: Pro indexes none of them, only the scan sees them */
+  const delayedOnly = useMemo(
+    () =>
+      indexed.data
+        ? [...delayed.counts.entries()]
+            .filter(([id]) => !indexedIds.has(id))
+            .map(([id, c]) => ({ id, ...c }))
+            .sort((x, y) => y.delayed - x.delayed)
+        : [],
+    [delayed.counts, indexedIds, indexed.data],
+  );
+  // "delayed only" rows follow the indexed groups, on the last page of those
+  const indexedPages = Math.max(1, Math.ceil((groups.data?.total ?? 0) / pageSize));
+  const lastPage = page === indexedPages;
+
+  const runGroup = (groupId: string, action: GroupActionKind) =>
+    groupAction.mutate(
+      { groupId, action },
+      {
+        onSuccess: () => {
+          toast.success(`Group ${groupId} ${action === "pause" ? "paused" : action === "resume" ? "resumed" : "drained"}`);
+          delayed.refetch();
+        },
+        onError: (e) => toast.error(errorMessage(e)),
+        onSettled: () => setDrainGroup(null),
+      },
+    );
+  const actionsFor = (groupId: string, opts: { paused: boolean; waiting: number; delayed: number | null }) =>
+    showActions ? (
+      <GroupActions
+        proApi={proApi}
+        busy={groupAction.isPending}
+        paused={opts.paused}
+        canPromote={opts.delayed !== 0}
+        canDrain={isAdmin && opts.waiting > 0}
+        onPromote={() => setPromoteGroup(groupId)}
+        onToggle={() => runGroup(groupId, opts.paused ? "resume" : "pause")}
+        onDrain={() => setDrainGroup(groupId)}
+      />
+    ) : null;
+  const delayedCell = (groupId: string) => {
+    const c = delayed.counts.get(groupId);
+    if (delayed.loading) return <span className="text-fg-subtle">…</span>;
+    if (!c) return <span className="text-fg-subtle">{delayed.complete ? "0" : "–"}</span>;
+    return (
+      <Link to={routes.queueGroup(connectionId, queue, groupId, "delayed")} className="text-accent hover:underline" title="List this group's delayed jobs" onClick={(e) => e.stopPropagation()}>
+        {formatNumber(c.delayed)}
+        {!delayed.complete && "+"}
+      </Link>
+    );
+  };
 
   return (
     <Page wide>
@@ -60,11 +123,18 @@ export function GroupsPage() {
             <Badge variant="pro">BullMQ Pro</Badge>
           </span>
         }
-        description={`Groups partition a queue for fairness, with their own concurrency and rate limit. ${summary.data ? `${formatNumber(summary.data.groupsCount)} groups with jobs waiting or running.` : ""} A group whose jobs are all delayed is not listed until one becomes due: Pro keeps delayed jobs in the queue's delayed state, not under the group. Filter the queue's Delayed tab by group to see them.`}
+        description="Groups partition a queue for fairness, with their own concurrency and rate limit."
       />
 
-      {groups.data && <StatusStrip byStatus={groups.data.byStatus} total={groups.data.total} />}
-      {groups.data && !groups.data.bullmqProApi && <ProApiNotice />}
+      {groups.data && (
+        <StatusStrip
+          byStatus={groups.data.byStatus}
+          total={groups.data.total}
+          delayedOnly={indexed.data ? delayedOnly.length : null}
+          delayedScan={(summary.data?.counts.delayed ?? 0) > 0 ? delayed : null}
+        />
+      )}
+      {groups.data && !proApi && <ProApiNotice />}
 
       <div className="card overflow-hidden">
         <Table>
@@ -73,9 +143,11 @@ export function GroupsPage() {
               <Th>Group</Th>
               <Th>Status</Th>
               <Th align="right">Waiting</Th>
+              <Th align="right">Delayed</Th>
               <Th align="right">Active / concurrency</Th>
               <Th align="right">Rate limit</Th>
               <Th align="right">Next</Th>
+              {showActions && <Th align="right">Actions</Th>}
             </tr>
           </thead>
           <tbody>
@@ -89,19 +161,108 @@ export function GroupsPage() {
                 {errorMessage(groups.error)}
               </TableMessage>
             )}
-            {groups.data && groups.data.groups.length === 0 && (
+            {groups.data && groups.data.groups.length === 0 && delayedOnly.length === 0 && !delayed.loading && (
               <TableMessage colSpan={cols}>No groups with jobs right now. Add jobs with opts.group.id to see them here.</TableMessage>
             )}
             {groups.data?.groups.map((g) => (
-              <GroupRow key={g.id} g={g} now={now} onOpen={() => navigate(routes.group(connectionId, queue, g.id))} href={routes.group(connectionId, queue, g.id)} />
+              <GroupRow
+                key={g.id}
+                g={g}
+                now={now}
+                onOpen={() => navigate(routes.group(connectionId, queue, g.id))}
+                href={routes.group(connectionId, queue, g.id)}
+                delayed={delayedCell(g.id)}
+                actions={actionsFor(g.id, { paused: g.status === "paused", waiting: g.waiting, delayed: delayed.counts.get(g.id)?.delayed ?? (delayed.complete ? 0 : null) })}
+              />
             ))}
+            {lastPage &&
+              delayedOnly.map((g) => (
+                <DelayedOnlyRow
+                  key={g.id}
+                  id={g.id}
+                  nextRunAt={g.nextRunAt}
+                  now={now}
+                  onOpen={() => navigate(routes.queueGroup(connectionId, queue, g.id, "delayed"))}
+                  href={routes.group(connectionId, queue, g.id)}
+                  delayed={delayedCell(g.id)}
+                  actions={actionsFor(g.id, { paused: false, waiting: 0, delayed: g.delayed })}
+                />
+              ))}
           </tbody>
         </Table>
         <div className="border-t border-border px-3 py-2">
-          <Pagination page={page} pageSize={pageSize} total={groups.data?.total ?? 0} count={groups.data?.groups.length} onPage={setPage} onPageSize={(s) => (setPageSize(s), setPage(1))} />
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={(groups.data?.total ?? 0) + delayedOnly.length}
+            count={(groups.data?.groups.length ?? 0) + (lastPage ? delayedOnly.length : 0)}
+            onPage={setPage}
+            onPageSize={(s) => (setPageSize(s), setPage(1))}
+          />
         </div>
       </div>
+
+      {promoteGroup && (
+        <PromoteMatchingDialog
+          open
+          onClose={() => {
+            setPromoteGroup(null);
+            delayed.refetch();
+          }}
+          connectionId={connectionId}
+          queue={queue}
+          match={{ groupId: promoteGroup }}
+        />
+      )}
+      <ConfirmDialog
+        open={drainGroup !== null}
+        onClose={() => setDrainGroup(null)}
+        title="Drain group"
+        description={`Remove every waiting job of group ${drainGroup ?? ""} in ${queue} (BullMQ Pro's deleteGroup)? Its delayed jobs stay in the queue's delayed state. This cannot be undone.`}
+        confirmText="Drain group"
+        danger
+        loading={groupAction.isPending}
+        onConfirm={() => drainGroup && runGroup(drainGroup, "drain")}
+      />
     </Page>
+  );
+}
+
+/** Per-row group actions. Clicks do not reach the row, which opens the group. */
+function GroupActions(props: {
+  proApi: boolean;
+  busy: boolean;
+  paused: boolean;
+  canPromote: boolean;
+  canDrain: boolean;
+  onPromote: () => void;
+  onToggle: () => void;
+  onDrain: () => void;
+}) {
+  const hint = props.proApi ? undefined : "Needs BullMQ Pro's package installed next to Bullpane";
+  return (
+    <span className="inline-flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+      {props.canPromote && (
+        <Button size="icon-xs" variant="ghost" title={hint ?? "Promote all delayed jobs of this group"} aria-label="Promote all delayed jobs" disabled={!props.proApi} onClick={props.onPromote}>
+          <FastForward />
+        </Button>
+      )}
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        title={hint ?? (props.paused ? "Resume group" : "Pause group")}
+        aria-label={props.paused ? "Resume group" : "Pause group"}
+        disabled={!props.proApi || props.busy}
+        onClick={props.onToggle}
+      >
+        {props.paused ? <Play /> : <Pause />}
+      </Button>
+      {props.canDrain && (
+        <Button size="icon-xs" variant="ghost" className="hover:text-danger" title={hint ?? "Drain group (its waiting jobs)"} aria-label="Drain group" disabled={!props.proApi || props.busy} onClick={props.onDrain}>
+          <Trash2 />
+        </Button>
+      )}
+    </span>
   );
 }
 
@@ -127,8 +288,22 @@ function ProApiNotice() {
   );
 }
 
-/** One chip per Pro status, in Pro's order. Counts are ZCARDs, so they are exact. */
-function StatusStrip({ byStatus, total }: { byStatus: GroupsByStatus; total: number }) {
+/**
+ * One chip per Pro status, in Pro's order (ZCARDs, exact), plus "delayed only": the
+ * groups only the delayed scan sees, with how far that scan got.
+ */
+function StatusStrip({
+  byStatus,
+  total,
+  delayedOnly,
+  delayedScan,
+}: {
+  byStatus: GroupsByStatus;
+  total: number;
+  delayedOnly: number | null;
+  delayedScan: ReturnType<typeof useDelayedGroupCounts> | null;
+}) {
+  const extra = delayedOnly ?? 0;
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
       {GROUP_STATUSES.map((s) => (
@@ -141,14 +316,40 @@ function StatusStrip({ byStatus, total }: { byStatus: GroupsByStatus; total: num
           </span>
         </Tooltip>
       ))}
+      {delayedScan && (
+        <Tooltip content={DELAYED_ONLY_HINT} side="bottom">
+          <span className={cn("inline-flex cursor-help items-center gap-1.5 rounded-md border border-border px-2 py-1", extra === 0 && "opacity-60")}>
+            <Badge variant="neutral" dot size="xs">
+              delayed only
+            </Badge>
+            <span className="num font-medium">
+              {delayedOnly === null || delayedScan.loading ? "…" : formatNumber(extra)}
+              {!delayedScan.complete && delayedOnly !== null && "+"}
+            </span>
+          </span>
+        </Tooltip>
+      )}
       <span className="text-fg-subtle">
-        {formatNumber(total)} {total === 1 ? "group" : "groups"} with jobs
+        {formatNumber(total + extra)} {total + extra === 1 ? "group" : "groups"} with jobs
       </span>
+      {delayedScan && !delayedScan.complete && !delayedScan.loading && (
+        <span className="text-fg-subtle">
+          · delayed counts from {formatNumber(delayedScan.scanned)} of {formatNumber(delayedScan.total)} delayed jobs
+          {delayedScan.scanMore && (
+            <>
+              {" "}
+              <button type="button" className="text-accent hover:underline" onClick={delayedScan.scanMore}>
+                scan more
+              </button>
+            </>
+          )}
+        </span>
+      )}
     </div>
   );
 }
 
-function GroupRow({ g, now, onOpen, href }: { g: GroupSummary; now: number; onOpen: () => void; href: string }) {
+function GroupRow({ g, now, onOpen, href, delayed, actions }: { g: GroupSummary; now: number; onOpen: () => void; href: string; delayed: ReactNode; actions: ReactNode }) {
   const capped = g.concurrency !== null;
   const fill = capped ? Math.min(100, Math.round((g.active / Math.max(1, g.concurrency ?? 1)) * 100)) : 0;
   return (
@@ -170,6 +371,9 @@ function GroupRow({ g, now, onOpen, href }: { g: GroupSummary; now: number; onOp
             <span className="ml-1.5 cursor-help text-[10px] text-fg-subtle">+{formatNumber(g.prioritized)} prioritized</span>
           </Tooltip>
         )}
+      </Td>
+      <Td num align="right">
+        {delayed}
       </Td>
       <Td num align="right">
         <span className="inline-flex items-center justify-end gap-2">
@@ -211,6 +415,44 @@ function GroupRow({ g, now, onOpen, href }: { g: GroupSummary; now: number; onOp
       <Td num align="right" muted>
         <NextCell g={g} now={now} />
       </Td>
+      {actions && <Td align="right">{actions}</Td>}
+    </Tr>
+  );
+}
+
+const DELAYED_ONLY_HINT =
+  "Groups whose jobs are all delayed. BullMQ Pro keeps delayed jobs in the queue's delayed state and indexes the group only once one becomes due, so these come from a scan of the delayed jobs.";
+
+/** A group only the delayed scan knows about: nothing waiting or running yet. */
+function DelayedOnlyRow({ id, nextRunAt, now, onOpen, href, delayed, actions }: { id: string; nextRunAt: number; now: number; onOpen: () => void; href: string; delayed: ReactNode; actions: ReactNode }) {
+  return (
+    <Tr onActivate={onOpen}>
+      <Td mono>
+        <Link to={href} className="text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
+          {id}
+        </Link>
+      </Td>
+      <Td className="whitespace-nowrap">
+        <Badge variant="neutral" dot size="xs" title={DELAYED_ONLY_HINT}>
+          delayed only
+        </Badge>
+      </Td>
+      <Td num align="right" muted>
+        0
+      </Td>
+      <Td num align="right">
+        {delayed}
+      </Td>
+      <Td num align="right" muted>
+        –
+      </Td>
+      <Td num align="right" muted>
+        –
+      </Td>
+      <Td num align="right" muted>
+        {nextRunAt > now ? `first runs in ${formatDuration(nextRunAt - now)}` : "due"}
+      </Td>
+      {actions && <Td align="right">{actions}</Td>}
     </Tr>
   );
 }

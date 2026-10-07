@@ -93,6 +93,7 @@ function fakeInspector() {
         : { mode: "ran_copy", jobId: "copy-1", schedulerId: "nightly" };
     }),
     bullmqProApi: true,
+    getDelayedGroups: vi.fn(async () => ({ groups: [{ id: "tenant-a", delayed: 3, nextRunAt: 1 }], ungrouped: 0, scanned: 3, total: 3, nextCursor: null })),
     promoteMatching: vi.fn(async () => ({
       matched: 3,
       promoted: 2,
@@ -316,6 +317,15 @@ describe("BullMQ Pro group actions", () => {
   });
 
   const group = (gid: string, action: string) => `/api/connections/c1/queues/payments/groups/${gid}/${action}`;
+
+  it("lists the groups that have delayed jobs, resuming from a cursor", async () => {
+    const w = await build("viewer");
+    const res = await w.app.inject({ method: "GET", url: "/api/connections/c1/queues/payments/groups-delayed?cursor=10000" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().groups[0]).toEqual({ id: "tenant-a", delayed: 3, nextRunAt: 1 });
+    expect(w.inspector.getDelayedGroups).toHaveBeenCalledWith("payments", { cursor: "10000" });
+    await w.app.close();
+  });
 
   it("says on the groups list whether BullMQ Pro's API is installed", async () => {
     const w = await build("viewer");
